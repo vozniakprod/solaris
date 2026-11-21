@@ -1,0 +1,6 @@
+{
+  "name": "Solaris 2027 — Matryca Solarna i Strategia Roku",
+  "description": "Osobista analiza Solariusza na 2027 rok oraz zgodności partnerskiej oparta na dokładnych obliczeniach efemeryd.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
