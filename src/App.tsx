@@ -37,6 +37,9 @@ const INITIAL_UNLOCK: UnlockState = {
   calendarUnlocked: false,
   pdfUnlocked: false,
   orderId: null,
+  lastStripeSessionId: null,
+  customerEmail: null,
+  emailDeliveredTo: null,
   firstPurchaseAtMs: null,
   confirmation: null,
 };
@@ -135,22 +138,69 @@ export default function App() {
           const verifyRes = await fetch(
             `/api/checkout/verify?sessionId=${encodeURIComponent(targetSessionId)}&stripe_session_id=${encodeURIComponent(stripeSessionId)}`,
           );
-          const verifyJson = (await verifyRes.json()) as {
+          const verifyRaw = await verifyRes.text();
+          let verifyJson: {
             ok?: boolean;
             verified?: boolean;
             unlockState?: UnlockState;
             report?: SolarisFullReport | null;
             error?: string;
-          };
+          } = {};
+          if (verifyRaw) {
+            try {
+              verifyJson = JSON.parse(verifyRaw);
+            } catch {
+              verifyJson = {};
+            }
+          }
           if (!cancelled) {
             if (verifyRes.ok && verifyJson.verified && verifyJson.unlockState) {
               serverUnlock = { ...INITIAL_UNLOCK, ...verifyJson.unlockState };
               if (verifyJson.report) {
                 serverReport = verifyJson.report;
               }
+              const reportForDelivery =
+                serverReport ??
+                (persisted?.report && persisted.report.sessionId === targetSessionId
+                  ? persisted.report
+                  : null);
+
+              // Stateless Vercel cold-start: enrich paid modules + auto-deliver full report email in one round-trip
+              if (reportForDelivery && (!verifyJson.report || !serverUnlock.emailDeliveredTo)) {
+                try {
+                  const deliverRes = await fetch('/api/report/deliver-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      sessionId: targetSessionId,
+                      stripeSessionId,
+                      report: reportForDelivery,
+                    }),
+                  });
+                  if (deliverRes.ok) {
+                    const deliverData = (await deliverRes.json()) as {
+                      report?: SolarisFullReport;
+                      deliveredTo?: string | null;
+                      customerEmail?: string | null;
+                    };
+                    if (deliverData.report) serverReport = deliverData.report;
+                    if (deliverData.deliveredTo || deliverData.customerEmail) {
+                      serverUnlock = {
+                        ...serverUnlock,
+                        emailDeliveredTo: deliverData.deliveredTo ?? serverUnlock.emailDeliveredTo,
+                        customerEmail: deliverData.customerEmail ?? serverUnlock.customerEmail,
+                      };
+                    }
+                  }
+                } catch {
+                  // keep locally stored deterministic report if enrichment/email times out
+                }
+              }
               setPaymentNotice({
                 type: 'success',
-                text: 'Płatność potwierdzona przez Stripe. Wybrane moduły raportu Solaris 2027 są już odblokowane poniżej.',
+                text: serverUnlock.emailDeliveredTo
+                  ? `Płatność potwierdzona przez Stripe. Wybrane moduły są już odblokowane, a pełny raport wysłaliśmy także na ${serverUnlock.emailDeliveredTo}.`
+                  : 'Płatność potwierdzona przez Stripe. Wybrane moduły raportu Solaris 2027 są już odblokowane poniżej.',
               });
               cleanUrlParams();
             } else if (verifyRes.ok && verifyJson.verified === false) {
@@ -239,7 +289,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 20000);
 
     try {
       const [response] = await Promise.all([
@@ -254,12 +304,20 @@ export default function App() {
 
       window.clearTimeout(timeoutId);
 
-      const json = (await response.json()) as {
+      const rawText = await response.text();
+      let json: {
         report?: SolarisFullReport;
         unlockState?: UnlockState;
         code?: string;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          json = JSON.parse(rawText);
+        } catch {
+          json = {};
+        }
+      }
 
       if (!response.ok || !json.report) {
         if (json.code === 'PLACE_NOT_FOUND') {

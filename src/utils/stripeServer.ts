@@ -13,6 +13,9 @@ export interface StripeCheckoutMetadata {
   pdf: 'true' | 'false';
   priceGrossPln: string;
   isUpsell: 'true' | 'false';
+  regulaminVersion?: string;
+  consentsAcceptedAt?: string;
+  marketingConsent?: 'true' | 'false';
 }
 
 export interface CreateStripeCheckoutInput {
@@ -30,6 +33,7 @@ export interface CreateStripeCheckoutInput {
 export interface StripeCheckoutSessionObject {
   id: string;
   url: string | null;
+  created?: number;
   payment_status: 'paid' | 'unpaid' | 'no_payment_required' | string;
   status: 'open' | 'complete' | 'expired' | string;
   amount_total?: number | null;

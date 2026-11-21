@@ -21,18 +21,22 @@ export interface LegalDocumentData {
 
 export const SELLER_LEGAL_CONFIG = {
   serviceName: 'Solaris 2027',
-  domain: '[[https://TWOJA-DOMENA.pl]]',
-  sellerName: '[[Imię i nazwisko / Nazwa firmy Sprzedawcy]]',
-  sellerAddress: '[[Adres do doręczeń / siedziby]]',
-  sellerNip: '[[NIP — jeśli dotyczy]]',
-  contactEmail: 'kontakt@solaris2027.pl',
+  domain: 'https://solaris27.pl',
+  sellerName: 'Roman V.',
+  sellerAddress: 'Szczęsna 5A/112',
+  sellerNip: '',
+  contactEmail: 'kontakt@solaris27.pl',
   regulaminVersion: '1.0',
-  effectiveDate: '[[DD.MM.RRRR]]',
+  effectiveDate: '21.11.2026',
   stripeProductName: 'Solaris 2027 — spersonalizowany raport cyfrowy',
   stripeProductDescription:
     'Cyfrowy raport na 2027 rok przygotowany na podstawie danych i odpowiedzi podanych przez klienta. Interpretacja o charakterze inspiracyjnym.',
-  stripeStatementDescriptor: 'SOLARIS2027',
+  stripeStatementDescriptor: 'SOLARIS27',
 } as const;
+
+const SELLER_NIP_SEGMENT = SELLER_LEGAL_CONFIG.sellerNip
+  ? `, ${SELLER_LEGAL_CONFIG.sellerNip}`
+  : '';
 
 export const LEGAL_TEXTS = {
   footerShortDisclaimer:
@@ -57,7 +61,7 @@ export const LEGAL_TEXTS = {
   cityNotFoundError:
     'Nie znaleźliśmy takiej miejscowości. Sprawdź pisownię lub wybierz najbliższe większe miasto.',
   serverCalcError:
-    'Mamy chwilowy problem z obliczeniami. Twoje dane zostały zapisane — spróbuj ponownie za minutę lub napisz na kontakt@solaris2027.pl.',
+    'Mamy chwilowy problem z obliczeniami. Twoje dane zostały zapisane — spróbuj ponownie za minutę lub napisz na kontakt@solaris27.pl.',
   paymentFailedError:
     'Płatność nie została zrealizowana. Nie pobraliśmy środków. Spróbuj ponownie lub wybierz inną metodę płatności.',
   checkbox2Withdrawal:
@@ -80,7 +84,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocumentData> = {
         heading: '§1. Postanowienia ogólne',
         paragraphs: [
           `1. Niniejszy regulamin określa zasady korzystania z serwisu internetowego dostępnego pod adresem ${SELLER_LEGAL_CONFIG.domain} (dalej: „Serwis”) oraz zasady sprzedaży spersonalizowanych raportów cyfrowych (dalej: „Raport”).`,
-          `2. Sprzedawcą i usługodawcą jest: ${SELLER_LEGAL_CONFIG.sellerName}, adres: ${SELLER_LEGAL_CONFIG.sellerAddress}, ${SELLER_LEGAL_CONFIG.sellerNip}, e-mail: ${SELLER_LEGAL_CONFIG.contactEmail} (dalej: „Sprzedawca”).`,
+          `2. Sprzedawcą i usługodawcą jest: ${SELLER_LEGAL_CONFIG.sellerName}, adres: ${SELLER_LEGAL_CONFIG.sellerAddress}${SELLER_NIP_SEGMENT}, e-mail: ${SELLER_LEGAL_CONFIG.contactEmail} (dalej: „Sprzedawca”).`,
           `3. Kontakt ze Sprzedawcą: e-mail ${SELLER_LEGAL_CONFIG.contactEmail}.`,
           '4. Użyte w regulaminie określenia oznaczają:',
         ],
@@ -124,7 +128,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocumentData> = {
         heading: '§4. Zamówienia i płatności',
         paragraphs: [
           '1. Informacje o Raporcie, jego zakresie i cenie podane w Serwisie nie stanowią oferty w rozumieniu Kodeksu cywilnego, lecz zaproszenie do zawarcia umowy.',
-          '2. Ceny w Serwisie podawane są w złotych polskich (PLN) jako ceny brutto ([[Wariant A: Sprzedawca nie jest zarejestrowany jako podatnik VAT / Wariant B: ceny zawierają podatek VAT]]).',
+          '2. Ceny w Serwisie podawane są w złotych polskich (PLN) jako ceny brutto (Sprzedawca korzysta ze zwolnienia z podatku VAT i nie jest zarejestrowany jako czynny podatnik VAT).',
           '3. Aby złożyć zamówienie, Klient: (1) wybiera wariant Raportu, (2) podaje wymagane dane, (3) zapoznaje się z Regulaminem i zaznacza wymagane oświadczenia, (4) klika przycisk „Zamawiam i płacę” i (5) dokonuje płatności.',
           '4. Złożenie zamówienia wiąże się z obowiązkiem zapłaty. Umowa zostaje zawarta z chwilą złożenia zamówienia i potwierdzenia płatności.',
           '5. Płatności obsługuje Stripe Payments Europe Ltd. Dostępne metody płatności (np. BLIK, karta płatnicza, Apple Pay, Google Pay) wyświetlane są w procesie zamówienia. Dane płatnicze przetwarzane są przez operatora płatności; Sprzedawca nie ma dostępu do pełnych danych karty.',
@@ -134,8 +138,8 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocumentData> = {
       {
         heading: '§5. Realizacja umowy i dostarczenie Raportu',
         paragraphs: [
-          '1. Raport jest dostarczany w postaci cyfrowej: poprzez udostępnienie go pod unikalnym adresem internetowym w Serwisie oraz w formie pliku do wydruku PDF / kalendarza .ics (zgodnie z wybranym wariantem) bezpośrednio po potwierdzeniu płatności, nie później niż w ciągu 30 minut od zaksięgowania płatności.',
-          '2. Link do Raportu jest przypisany do zamówienia. Klient powinien go zachować; Sprzedawca może przesłać link na adres e-mail podany w zamówieniu.',
+          '1. Raport jest dostarczany w postaci cyfrowej: poprzez udostępnienie go na stronie Serwisu (z możliwością zapisu PDF A4 oraz pobrania kalendarza .ics zgodnie z wybranym wariantem) oraz wysyłkę pełnej treści Raportu (wraz z załącznikiem .ics, jeśli dotyczy) na adres e-mail podany w zamówieniu — bezpośrednio po potwierdzeniu płatności, nie później niż w ciągu 30 minut od zaksięgowania płatności.',
+          '2. Klient powinien zachować otrzymaną wiadomość e-mail z Raportem lub zapisać wersję PDF A4; w razie potrzeby może ponownie wysłać kopię na adres e-mail z poziomu strony zamówienia.',
           '3. Raport jest dostępny dla Klienta przez okres 12 miesięcy od dostarczenia, chyba że Klient wcześniej zażąda jego usunięcia.',
           '4. Jeżeli z przyczyn technicznych Raport nie zostanie dostarczony, Klient powinien niezwłocznie skontaktować się ze Sprzedawcą. Sprzedawca dostarczy Raport ponownie lub zwróci cenę.',
         ],
@@ -217,7 +221,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocumentData> = {
       {
         heading: '1. Administrator danych',
         paragraphs: [
-          `Administratorem Twoich danych osobowych jest ${SELLER_LEGAL_CONFIG.sellerName}, adres: ${SELLER_LEGAL_CONFIG.sellerAddress}, ${SELLER_LEGAL_CONFIG.sellerNip}, e-mail: ${SELLER_LEGAL_CONFIG.contactEmail} (dalej: „Administrator”).`,
+          `Administratorem Twoich danych osobowych jest ${SELLER_LEGAL_CONFIG.sellerName}, adres: ${SELLER_LEGAL_CONFIG.sellerAddress}${SELLER_NIP_SEGMENT}, e-mail: ${SELLER_LEGAL_CONFIG.contactEmail} (dalej: „Administrator”).`,
           `W sprawach dotyczących danych osobowych możesz pisać na adres: ${SELLER_LEGAL_CONFIG.contactEmail}.`,
         ],
       },
@@ -263,17 +267,17 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocumentData> = {
       {
         heading: '4. Zautomatyzowane przetwarzanie i sztuczna inteligencja',
         paragraphs: [
-          'Raport jest generowany automatycznie z użyciem narzędzi obliczeniowych oraz modeli sztucznej inteligencji (Google LLC — Gemini API). Dane niezbędne do przygotowania Raportu (np. data, miejsce i odpowiedzi z quizu) są przekazywane temu dostawcy wyłącznie w zakresie koniecznym do wygenerowania treści. Nie podejmujemy wobec Ciebie decyzji wywołujących skutki prawne ani w podobny sposób istotnie na Ciebie wpływających. Raport ma charakter rozrywkowy i inspiracyjny.',
+          'Raport jest generowany automatycznie z użyciem narzędzi obliczeniowych oraz modeli sztucznej inteligencji (OpenAI, L.L.C. / OpenAI Ireland Ltd.). Dane niezbędne do przygotowania Raportu (np. data, miejsce i odpowiedzi z quizu) są przekazywane temu dostawcy wyłącznie w zakresie koniecznym do wygenerowania treści. Nie podejmujemy wobec Ciebie decyzji wywołujących skutki prawne ani w podobny sposób istotnie na Ciebie wpływających. Raport ma charakter rozrywkowy i inspiracyjny.',
         ],
       },
       {
         heading: '5. Odbiorcy danych',
         paragraphs: ['Dane mogą być powierzane lub udostępniane podmiotom, z których usług korzystamy:'],
         bullets: [
-          'operatorowi płatności: Stripe Payments Europe Ltd. (płatności, BLIK, karty);',
-          'dostawcom hostingu i infrastruktury: Google Ireland Ltd. / Google LLC oraz dostawcy serwera aplikacyjnego ([[dopasuj do swojego stosu produkcyjnego]]);',
-          'dostawcy modeli sztucznej inteligencji: Google LLC (Gemini API);',
-          'dostawcy poczty e-mail: [[nazwa dostawcy e-mail, np. Resend / Brevo]];',
+          'operatorowi płatności: Stripe Payments Europe Ltd. (płatności, BLIK, karty, Apple Pay, Google Pay);',
+          'dostawcom hostingu, domeny i infrastruktury sieciowej: Vercel Inc., Cloudflare, Inc. oraz Hostinger International Ltd.;',
+          'dostawcy modeli sztucznej inteligencji: OpenAI, L.L.C. / OpenAI Ireland Ltd. (wyłącznie dane niezbędne do wygenerowania treści Raportu);',
+          'dostawcy wysyłki wiadomości e-mail: Resend (Plus Five Five, Inc.) — w celu dostarczenia Raportu i potwierdzenia zamówienia;',
           'dostawcom narzędzi analitycznych i reklamowych — tylko po Twojej zgodzie (jeśli aktywowane w Serwisie);',
           'biuru rachunkowemu i doradcom prawnym (jeśli dotyczy);',
           'organom publicznym, jeśli wymaga tego prawo.',
@@ -282,7 +286,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocumentData> = {
       {
         heading: '6. Przekazywanie danych poza EOG',
         paragraphs: [
-          `Część dostawców (np. Google, Stripe) może przetwarzać dane poza Europejskim Obszarem Gospodarczym, w tym w USA. Transfer odbywa się na podstawie mechanizmów przewidzianych w RODO, w szczególności decyzji Komisji Europejskiej o odpowiednim stopniu ochrony (EU–US Data Privacy Framework, o ile dany podmiot jest certyfikowany) lub standardowych klauzul umownych. Kopię zabezpieczeń możesz uzyskać, pisząc na adres ${SELLER_LEGAL_CONFIG.contactEmail}.`,
+          `Część dostawców (np. Stripe, Vercel, OpenAI, Resend, Cloudflare) może przetwarzać dane poza Europejskim Obszarem Gospodarczym, w tym w USA. Transfer odbywa się na podstawie mechanizmów przewidzianych w RODO, w szczególności decyzji Komisji Europejskiej o odpowiednim stopniu ochrony (EU–US Data Privacy Framework, o ile dany podmiot jest certyfikowany) lub standardowych klauzul umownych. Kopię zabezpieczeń możesz uzyskać, pisząc na adres ${SELLER_LEGAL_CONFIG.contactEmail}.`,
         ],
       },
       {

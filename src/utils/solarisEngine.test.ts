@@ -232,6 +232,12 @@ test('durable order confirmation and static HTML legal documents include require
   assert.ok(html.includes('<html lang="pl">'));
   assert.ok(html.includes('§6. Odstąpienie od umowy'));
   assert.ok(html.includes('GeoNames.org'));
+  assert.ok(html.includes('https://solaris27.pl'));
+  assert.ok(html.includes('kontakt@solaris27.pl'));
+  for (const doc of Object.values(LEGAL_DOCUMENTS)) {
+    const rendered = renderStaticLegalHtml(doc);
+    assert.ok(!rendered.includes('[['), `Found unreplaced placeholder in ${doc.id}`);
+  }
 });
 
 test('Stripe server helpers validate keys, session IDs, Checkout params, and HMAC webhook signatures', async () => {
@@ -351,4 +357,125 @@ test('OpenAI editorial engine enforces Polish safety rules, omits houses on unkn
   assert.equal(unchanged.freeCoreVectorTitle, base.freeCoreVectorTitle);
 });
 
+test('resolveSafeBaseUrl resolves Vercel forwarded host/proto safely and blocks host injection', async () => {
+  const { resolveSafeBaseUrl } = await import('../server/createApiApp');
+  const vercelApp = (await import('../../api/index')).default;
+  assert.equal(typeof vercelApp, 'function');
+
+  const prevAppUrl = process.env.APP_URL;
+  delete process.env.APP_URL;
+
+  try {
+    const vercelReq = {
+      headers: {
+        'x-forwarded-proto': 'https',
+        'x-forwarded-host': 'solaris-snowy.vercel.app',
+      },
+      protocol: 'http',
+    } as never;
+    assert.equal(resolveSafeBaseUrl(vercelReq), 'https://solaris-snowy.vercel.app');
+
+    const maliciousReq = {
+      headers: {
+        'x-forwarded-proto': 'javascript',
+        'x-forwarded-host': 'evil.com/phish?x=1',
+      },
+      protocol: 'http',
+    } as never;
+    assert.equal(resolveSafeBaseUrl(maliciousReq, 3000), 'http://localhost:3000');
+  } finally {
+    if (prevAppUrl !== undefined) {
+      process.env.APP_URL = prevAppUrl;
+    }
+  }
+});
+
+test('emailDelivery escapes HTML, includes only unlocked modules, attaches .ics only when unlocked, and falls back safely without key', async () => {
+  const {
+    buildFollowUpReminderEmailPayload,
+    buildFullReportEmailPayload,
+    isResendConfigured,
+    maskEmailForUi,
+    sendEmailViaResend,
+  } = await import('./emailDelivery');
+  const { buildDurableOrderConfirmation } = await import('../data/legalDocuments');
+
+  assert.equal(isResendConfigured(''), false);
+  assert.equal(isResendConfigured('invalid_key'), false);
+  assert.equal(isResendConfigured('re_1234567890abcdef'), true);
+  assert.equal(maskEmailForUi('kasia.nowak@gmail.com'), 'ka***@gmail.com');
+
+  const report = computeDeterministicSolarisReport({
+    sessionId: 'email-test-1',
+    mode: 'solo',
+    relationType: null,
+    person1: {
+      name: 'Kasia <script>alert(1)</script>',
+      birthDate: '15.05.1996',
+      birthTime: '14:30',
+      timeUnknown: false,
+      city: 'Warszawa',
+    },
+    person2: null,
+    quizAnswers: {
+      money: 'Chcę zwiększyć dochód i podnieść stawki',
+      crisis: 'Tnę straty od razu i szukam planu B',
+      priority: 'Stagnacja w pracy lub zarobkach',
+      rhythm: 'Spokojny plan rozpisany na kwartały',
+      trigger: 'Brak konkretu i zmienianie zdania w ostatniej chwili',
+    },
+  });
+
+  const confirmation = buildDurableOrderConfirmation({
+    orderId: 'SOL-MAIL01',
+    personName: report.person1.name,
+    mode: 'solo',
+    priceGrossPln: '44,99 zł',
+    sessionId: report.sessionId,
+    baseUrl: 'https://solaris2027.pl',
+  });
+
+  const withCalendar = buildFullReportEmailPayload({
+    report,
+    unlockedModules: ['finanse'],
+    calendarUnlocked: true,
+    confirmation,
+  });
+
+  assert.ok(withCalendar.subject.includes('SOL-MAIL01'));
+  // XSS must be HTML-escaped
+  assert.ok(!withCalendar.html.includes('<script>alert(1)</script>'));
+  assert.ok(withCalendar.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+  // Only unlocked module ('finanse') should appear; locked module ('relacje') must NOT appear
+  assert.ok(withCalendar.html.includes(report.modules.finanse.title));
+  assert.ok(!withCalendar.html.includes(report.modules.relacje.title));
+  // Polish legal durable confirmation must be included
+  assert.ok(withCalendar.html.includes('art. 38 ustawy o prawach konsumenta'));
+  // .ics attachment must be attached when calendarUnlocked === true
+  assert.equal(withCalendar.attachments?.length, 1);
+  assert.equal(withCalendar.attachments?.[0]?.filename, 'solaris-2027-kalendarz.ics');
+  const decodedIcs = Buffer.from(withCalendar.attachments?.[0]?.content || '', 'base64').toString('utf8');
+  assert.ok(decodedIcs.startsWith('BEGIN:VCALENDAR\r\n'));
+
+  const withoutCalendar = buildFullReportEmailPayload({
+    report,
+    unlockedModules: ['finanse'],
+    calendarUnlocked: false,
+    confirmation,
+  });
+  assert.equal(withoutCalendar.attachments, undefined);
+
+  const followUp = buildFollowUpReminderEmailPayload({ baseUrl: 'https://solaris2027.pl' });
+  assert.ok(followUp.subject.includes('-20%'));
+  assert.ok(followUp.html.includes('35,99 zł'));
+
+  const unconfiguredRes = await sendEmailViaResend({
+    apiKey: '',
+    from: undefined,
+    to: 'kasia@example.pl',
+    payload: followUp,
+  });
+  assert.equal(unconfiguredRes.ok, false);
+  assert.equal(unconfiguredRes.reason, 'not_configured');
+});
 

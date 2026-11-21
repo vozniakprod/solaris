@@ -2,13 +2,13 @@ import * as Astronomy from 'astronomy-engine';
 import {
   resolveCityCoordinates,
   type PlaceOption,
-} from '../data/polishEuCities';
+} from '../data/polishEuCities.js';
 import {
   formatBirthDateInput,
   parsePolishBirthDate,
   type ParsedDate,
-} from './solarisMatrix';
-import type { FunnelMode, RelationType, ReportModuleId } from './solarisPricing';
+} from './solarisMatrix.js';
+import type { FunnelMode, RelationType, ReportModuleId } from './solarisPricing.js';
 
 export interface PersonInput {
   name: string;

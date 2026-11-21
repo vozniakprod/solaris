@@ -9,6 +9,8 @@ import {
   Download,
   Info,
   Lock,
+  Mail,
+  MailCheck,
   Printer,
   ShieldCheck,
   Target,
@@ -19,6 +21,7 @@ import type { SolarisFullReport } from '../utils/ephemerisEngine';
 import {
   calculateModularPricing,
   getAvailableModulesForMode,
+  isValidEmailAddress,
   POST_PURCHASE_UPSELL_GROSZE,
   formatPlnFromGrosze,
   type ReportModuleId,
@@ -30,6 +33,10 @@ import {
   type LegalDocId,
 } from '../data/legalDocuments';
 import { ReportVisualBento } from './ReportVisualBento';
+import {
+  PostPurchaseUpsellCard,
+  ReportCheckoutSection,
+} from './ReportCheckoutSection';
 
 export interface UnlockState {
   paid: boolean;
@@ -37,6 +44,9 @@ export interface UnlockState {
   calendarUnlocked: boolean;
   pdfUnlocked: boolean;
   orderId: string | null;
+  lastStripeSessionId?: string | null;
+  customerEmail?: string | null;
+  emailDeliveredTo?: string | null;
   firstPurchaseAtMs: number | null;
   confirmation: DurableOrderConfirmation | null;
 }
@@ -92,9 +102,9 @@ export function ReportDashboard({
   const allUnlocked = lockedModules.length === 0;
   const hasAnyPurchase = unlockState.unlockedModules.length > 0;
 
-  // Default pre-selection: Zgodność + Finanse in pair mode, Finanse in solo mode
+  // Default pre-selection: Full Package (clear best-value anchor; 1 click to switch to single modules)
   const [selectedModules, setSelectedModules] = useState<ReportModuleId[]>(() =>
-    report.mode === 'pair' ? ['zgodnosc', 'finanse'] : ['finanse'],
+    getAvailableModulesForMode(report.mode).map((m) => m.id),
   );
   const [includeCalendarBump, setIncludeCalendarBump] = useState(false);
 
@@ -104,9 +114,20 @@ export function ReportDashboard({
   const [secondPersonConsentAccepted, setSecondPersonConsentAccepted] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
 
+  const [checkoutEmail, setCheckoutEmail] = useState<string>(
+    () => unlockState.customerEmail || '',
+  );
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [copiedConfirmation, setCopiedConfirmation] = useState(false);
+  const [resendEmailInput, setResendEmailInput] = useState<string>(
+    () => unlockState.customerEmail || '',
+  );
+  const [isSendingReportEmail, setIsSendingReportEmail] = useState(false);
+  const [reportEmailStatus, setReportEmailStatus] = useState<{
+    type: 'idle' | 'ok' | 'error';
+    text: string;
+  }>({ type: 'idle', text: '' });
   const [pendingStripeCheckout, setPendingStripeCheckout] = useState<{
     checkoutUrl: string;
     stripeSessionId: string;
@@ -116,6 +137,12 @@ export function ReportDashboard({
   } | null>(null);
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [pendingStatusMsg, setPendingStatusMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (unlockState.customerEmail && !resendEmailInput) {
+      setResendEmailInput(unlockState.customerEmail);
+    }
+  }, [unlockState.customerEmail, resendEmailInput]);
 
   // Interactive monthly timeline focus
   const peakMonthIdx = useMemo(() => {
@@ -195,14 +222,25 @@ export function ReportDashboard({
 
   const focusModuleInPaywall = (id: ReportModuleId) => {
     setCheckoutError(null);
-    setSelectedModules((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    document.getElementById('modular-paywall')?.scrollIntoView({ behavior: 'smooth' });
+    setUseDownsellOffer(false);
+    setSelectedModules((prev) =>
+      prev.length >= availableModules.length ? [id] : prev.includes(id) ? prev : [...prev, id],
+    );
+    document.getElementById('checkout-panel')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   const selectFullBundle = () => {
     setCheckoutError(null);
     setUseDownsellOffer(false);
     setSelectedModules(availableModules.map((m) => m.id));
+  };
+
+  const selectSingleMode = () => {
+    setCheckoutError(null);
+    const defaultSingle: ReportModuleId = report.mode === 'pair' ? 'zgodnosc' : 'finanse';
+    setSelectedModules((prev) =>
+      prev.length >= availableModules.length || prev.length === 0 ? [defaultSingle] : prev,
+    );
   };
 
   const verifyPendingStripePayment = async (stripeSessionId: string, silent = false) => {
@@ -214,15 +252,56 @@ export function ReportDashboard({
       const res = await fetch(
         `/api/checkout/verify?sessionId=${encodeURIComponent(report.sessionId)}&stripe_session_id=${encodeURIComponent(stripeSessionId)}`,
       );
-      const json = (await res.json()) as {
+      const raw = await res.text();
+      let json: {
         ok?: boolean;
         verified?: boolean;
         unlockState?: UnlockState;
         report?: SolarisFullReport | null;
         error?: string;
-      };
+      } = {};
+      if (raw) {
+        try {
+          json = JSON.parse(raw);
+        } catch {
+          json = {};
+        }
+      }
       if (res.ok && json.verified && json.unlockState) {
-        onUnlockSuccess(json.unlockState, json.report ?? undefined);
+        let finalReport = json.report ?? undefined;
+        let finalUnlock = json.unlockState;
+        // Stateless Vercel cold-start enrichment + automatic full-report email delivery
+        if (!finalReport || !finalUnlock.emailDeliveredTo) {
+          try {
+            const deliverRes = await fetch('/api/report/deliver-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sessionId: report.sessionId,
+                stripeSessionId,
+                report: finalReport ?? report,
+              }),
+            });
+            if (deliverRes.ok) {
+              const deliverJson = (await deliverRes.json()) as {
+                report?: SolarisFullReport;
+                deliveredTo?: string | null;
+                customerEmail?: string | null;
+              };
+              if (deliverJson.report) finalReport = deliverJson.report;
+              if (deliverJson.deliveredTo || deliverJson.customerEmail) {
+                finalUnlock = {
+                  ...finalUnlock,
+                  emailDeliveredTo: deliverJson.deliveredTo ?? finalUnlock.emailDeliveredTo,
+                  customerEmail: deliverJson.customerEmail ?? finalUnlock.customerEmail,
+                };
+              }
+            }
+          } catch {
+            // keep verified unlock state even if email delivery times out
+          }
+        }
+        onUnlockSuccess(finalUnlock, finalReport);
         setPendingStripeCheckout(null);
         setPendingStatusMsg(null);
         setTermsAndAgeAccepted(false);
@@ -322,6 +401,14 @@ export function ReportDashboard({
       return;
     }
 
+    const trimmedCheckoutEmail = checkoutEmail.trim();
+    if (trimmedCheckoutEmail && !isValidEmailAddress(trimmedCheckoutEmail)) {
+      setCheckoutError(
+        'Wpisz poprawny adres e-mail do wysyłki raportu albo zostaw pole puste i wpisz go w Stripe.',
+      );
+      return;
+    }
+
     setCheckoutError(null);
     setIsPaying(true);
     try {
@@ -336,13 +423,15 @@ export function ReportDashboard({
           includeCalendarBump,
           hasRetentionDiscount,
           useDownsellOffer: useDownsellOffer && downsellSecondsLeft > 0,
+          customerEmail: trimmedCheckoutEmail || undefined,
           termsAndAgeAccepted: true,
           withdrawalWaiverAccepted: true,
           secondPersonConsentAccepted: report.mode === 'pair' ? secondPersonConsentAccepted : false,
           marketingConsent,
         }),
       });
-      const json = (await response.json()) as {
+      const rawText = await response.text();
+      let json: {
         ok?: boolean;
         requiresRedirect?: boolean;
         checkoutUrl?: string;
@@ -351,7 +440,14 @@ export function ReportDashboard({
         orderId?: string;
         amountPln?: string;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          json = JSON.parse(rawText);
+        } catch {
+          json = {};
+        }
+      }
 
       if (!response.ok || !json.ok || !json.checkoutUrl || !json.stripeSessionId) {
         setCheckoutError(json.error || LEGAL_TEXTS.paymentFailedError);
@@ -390,12 +486,15 @@ export function ReportDashboard({
           selectedModules: availableModules.map((m) => m.id),
           includeCalendarBump: true,
           isUpsell: true,
+          previousStripeSessionId: unlockState.lastStripeSessionId || '',
+          customerEmail: unlockState.customerEmail || checkoutEmail.trim() || undefined,
           termsAndAgeAccepted: true,
           withdrawalWaiverAccepted: true,
           secondPersonConsentAccepted: report.mode === 'pair' ? upsellSecondPerson : false,
         }),
       });
-      const json = (await response.json()) as {
+      const rawText = await response.text();
+      let json: {
         ok?: boolean;
         requiresRedirect?: boolean;
         checkoutUrl?: string;
@@ -404,7 +503,14 @@ export function ReportDashboard({
         orderId?: string;
         amountPln?: string;
         error?: string;
-      };
+      } = {};
+      if (rawText) {
+        try {
+          json = JSON.parse(rawText);
+        } catch {
+          json = {};
+        }
+      }
       if (!response.ok || !json.ok || !json.checkoutUrl || !json.stripeSessionId) {
         setUpsellError(json.error || LEGAL_TEXTS.paymentFailedError);
         return;
@@ -459,6 +565,78 @@ export function ReportDashboard({
       window.setTimeout(() => setCopiedConfirmation(false), 2400);
     } catch {
       // ignore clipboard errors
+    }
+  };
+
+  const handleSendReportEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetEmail = resendEmailInput.trim();
+    if (!isValidEmailAddress(targetEmail)) {
+      setReportEmailStatus({
+        type: 'error',
+        text: 'Wpisz poprawny adres e-mail, na który mamy wysłać pełny raport.',
+      });
+      return;
+    }
+    if (!unlockState.lastStripeSessionId) {
+      setReportEmailStatus({
+        type: 'error',
+        text: 'Brak identyfikatora płatności Stripe do wysyłki. Zapisz raport jako PDF A4 poniżej.',
+      });
+      return;
+    }
+
+    setIsSendingReportEmail(true);
+    setReportEmailStatus({ type: 'idle', text: '' });
+    try {
+      const res = await fetch('/api/report/deliver-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: report.sessionId,
+          stripeSessionId: unlockState.lastStripeSessionId,
+          recipientEmail: targetEmail,
+          report,
+          forceResend: true,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        sent?: boolean;
+        reason?: string;
+        deliveredTo?: string | null;
+        error?: string;
+      };
+
+      if (res.ok && json.sent) {
+        const masked = json.deliveredTo || targetEmail;
+        onUnlockSuccess({
+          ...unlockState,
+          customerEmail: targetEmail,
+          emailDeliveredTo: masked,
+        });
+        setReportEmailStatus({
+          type: 'ok',
+          text: `Pełny raport wysłany na ${masked}. Sprawdź skrzynkę (oraz folder Oferty / Spam).`,
+        });
+      } else if (json.reason === 'not_configured') {
+        setReportEmailStatus({
+          type: 'error',
+          text: 'Wysyłka e-mail nie jest jeszcze skonfigurowana na serwerze. Zapisz raport przyciskiem „Drukuj / PDF A4” poniżej.',
+        });
+      } else {
+        setReportEmailStatus({
+          type: 'error',
+          text: json.error || 'Nie udało się wysłać e-maila. Spróbuj ponownie za chwilę.',
+        });
+      }
+    } catch {
+      setReportEmailStatus({
+        type: 'error',
+        text: 'Chwilowy problem z połączeniem. Spróbuj ponownie za minutę lub pobierz PDF A4.',
+      });
+    } finally {
+      setIsSendingReportEmail(false);
     }
   };
 
@@ -595,6 +773,77 @@ export function ReportDashboard({
             </div>
           </dl>
 
+          {/* Full-report email delivery status + manual send/resend bar */}
+          {unlockState.lastStripeSessionId && (
+            <div className="no-print mt-4 rounded-2xl border border-[#4ADE80]/20 bg-black/25 p-3.5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-2.5">
+                  {unlockState.emailDeliveredTo ? (
+                    <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#4ADE80]" aria-hidden="true" />
+                  ) : (
+                    <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[#86EFAC]" aria-hidden="true" />
+                  )}
+                  <div>
+                    <p className="font-semibold text-white">
+                      {unlockState.emailDeliveredTo
+                        ? `Pełny raport wysłany na ${unlockState.emailDeliveredTo}`
+                        : 'Wyślij pełny raport prosto na swój e-mail'}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-[#BBF7D0]">
+                      Wiadomość zawiera cały odblokowany raport, harmonogram 12 miesięcy
+                      {unlockState.calendarUnlocked ? ' oraz załącznik kalendarza .ics.' : '.'}
+                    </p>
+                  </div>
+                </div>
+
+                <form
+                  onSubmit={handleSendReportEmail}
+                  noValidate
+                  className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                >
+                  <label htmlFor="resend-report-email" className="sr-only">
+                    Adres e-mail do wysyłki raportu
+                  </label>
+                  <input
+                    id="resend-report-email"
+                    type="email"
+                    placeholder="twoj@email.pl"
+                    value={resendEmailInput}
+                    onChange={(e) => {
+                      setResendEmailInput(e.target.value);
+                      if (reportEmailStatus.type !== 'idle') {
+                        setReportEmailStatus({ type: 'idle', text: '' });
+                      }
+                    }}
+                    className="min-h-[38px] w-full rounded-full border border-[#4ADE80]/30 bg-[#0F1512] px-3.5 text-xs text-white placeholder:text-[#6E8B78] focus:border-[#4ADE80] focus:outline-none sm:w-52"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSendingReportEmail}
+                    className="inline-flex min-h-[38px] shrink-0 items-center justify-center rounded-full bg-[#4ADE80] px-4 py-1.5 text-[11px] font-semibold text-[#0B120D] transition-opacity hover:opacity-90 disabled:opacity-50"
+                  >
+                    {isSendingReportEmail
+                      ? 'Wysyłanie...'
+                      : unlockState.emailDeliveredTo
+                        ? 'Wyślij ponownie'
+                        : 'Wyślij na e-mail'}
+                  </button>
+                </form>
+              </div>
+
+              {reportEmailStatus.type !== 'idle' && (
+                <p
+                  role={reportEmailStatus.type === 'error' ? 'alert' : 'status'}
+                  className={`mt-2.5 text-[11px] ${
+                    reportEmailStatus.type === 'ok' ? 'text-[#4ADE80]' : 'text-[#FFD7CC]'
+                  }`}
+                >
+                  {reportEmailStatus.text}
+                </p>
+              )}
+            </div>
+          )}
+
           <ul className="mt-3.5 space-y-1.5 border-t border-[#4ADE80]/15 pt-3 text-[11px] leading-relaxed text-[#BBF7D0]">
             <li>
               • Na Twoje wyraźne żądanie rozpoczęliśmy dostarczanie Raportu przed upływem 14-dniowego terminu do odstąpienia od umowy. Zgodnie z art. 38 ustawy o prawach konsumenta oznacza to utratę prawa odstąpienia, o czym zostałeś/aś poinformowany/a przed zakupem.
@@ -628,102 +877,32 @@ export function ReportDashboard({
         </section>
       )}
 
-      {/* POST-PURCHASE 15-MINUTE UPSELL BANNER (Partial buyers only) */}
+      {/* POST-PURCHASE 15-MINUTE UPSELL CARD (Partial buyers only) */}
       {hasAnyPurchase && !allUnlocked && upsellSecondsLeft > 0 && (
-        <section
-          aria-label="Oferta specjalna po zakupie"
-          className="no-print mb-6 rounded-[22px] border border-[#FF5C35]/50 bg-[#1B1312] p-4 sm:p-5"
-        >
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-            <div className="space-y-1">
-              <p className="font-mono text-xs font-semibold tabular-nums text-[#FF7B5A]">
-                OFERTA JEDNORAZOWA · WYGASA ZA {formatTimer(upsellSecondsLeft)}
-              </p>
-              <h2 className="font-display text-lg font-semibold text-white">
-                Odblokuj wszystkie pozostałe moduły ({lockedModules.length}) + Kalendarz .ics i PDF A4 za{' '}
-                {formatPlnFromGrosze(POST_PURCHASE_UPSELL_GROSZE)}
-              </h2>
-              <p className="text-xs text-[#C4C4CE]">
-                Zamiast dopłacać osobno za każdą sferę, uzupełnij cały raport 2027 jednym zamówieniem.
-              </p>
-            </div>
-
-            <div className="flex max-w-md shrink-0 flex-col gap-2">
-              <label className="flex cursor-pointer items-start gap-2 text-[11px] text-[#D4D4DC]">
-                <input
-                  type="checkbox"
-                  checked={upsellTermsAccepted}
-                  onChange={(e) => {
-                    setUpsellTermsAccepted(e.target.checked);
-                    if (upsellError) setUpsellError(null);
-                  }}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                />
-                <span>
-                  Mam ukończone 18 lat i akceptuję{' '}
-                  <button
-                    type="button"
-                    onClick={() => onOpenLegal('regulamin')}
-                    className="underline hover:text-white"
-                  >
-                    Regulamin
-                  </button>{' '}
-                  oraz{' '}
-                  <button
-                    type="button"
-                    onClick={() => onOpenLegal('polityka')}
-                    className="underline hover:text-white"
-                  >
-                    Politykę prywatności
-                  </button>
-                  .
-                </span>
-              </label>
-
-              <label className="flex cursor-pointer items-start gap-2 text-[11px] text-[#D4D4DC]">
-                <input
-                  type="checkbox"
-                  checked={upsellWaiver}
-                  onChange={(e) => {
-                    setUpsellWaiver(e.target.checked);
-                    if (upsellError) setUpsellError(null);
-                  }}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                />
-                <span>{LEGAL_TEXTS.checkbox2Withdrawal}</span>
-              </label>
-
-              {report.mode === 'pair' && (
-                <label className="flex cursor-pointer items-start gap-2 text-[11px] text-[#D4D4DC]">
-                  <input
-                    type="checkbox"
-                    checked={upsellSecondPerson}
-                    onChange={(e) => {
-                      setUpsellSecondPerson(e.target.checked);
-                      if (upsellError) setUpsellError(null);
-                    }}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                  />
-                  <span>{LEGAL_TEXTS.checkbox3SecondPerson}</span>
-                </label>
-              )}
-
-              <button
-                type="button"
-                disabled={isPaying}
-                onClick={handleUpsellRemaining}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-[#FF5C35] px-5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#FF6E4B] disabled:opacity-50"
-              >
-                Zamawiam i płacę {formatPlnFromGrosze(POST_PURCHASE_UPSELL_GROSZE)}
-              </button>
-              {upsellError && (
-                <p role="alert" className="text-xs text-[#FF8566]">
-                  {upsellError}
-                </p>
-              )}
-            </div>
-          </div>
-        </section>
+        <PostPurchaseUpsellCard
+          mode={report.mode}
+          lockedModules={lockedModules}
+          upsellSecondsLeft={upsellSecondsLeft}
+          upsellTermsAccepted={upsellTermsAccepted}
+          upsellWaiver={upsellWaiver}
+          upsellSecondPerson={upsellSecondPerson}
+          upsellError={upsellError}
+          isPaying={isPaying}
+          onToggleTerms={(checked) => {
+            setUpsellTermsAccepted(checked);
+            if (upsellError) setUpsellError(null);
+          }}
+          onToggleWaiver={(checked) => {
+            setUpsellWaiver(checked);
+            if (upsellError) setUpsellError(null);
+          }}
+          onToggleSecondPerson={(checked) => {
+            setUpsellSecondPerson(checked);
+            if (upsellError) setUpsellError(null);
+          }}
+          onUpsell={handleUpsellRemaining}
+          onOpenLegal={onOpenLegal}
+        />
       )}
 
       {/* TOP EPHEMERIS EXECUTIVE HEADER (Free Layer + Report Top Disclaimer + Honest Unknown-Time Note) */}
@@ -1175,321 +1354,51 @@ export function ReportDashboard({
         </section>
       )}
 
-      {/* BLURRED PREMIUM LOCKED PREVIEWS + INTERACTIVE PICK & MIX PAYWALL */}
+      {/* REDESIGNED FIGMA-NATIVE PAYWALL & CHECKOUT */}
       {!allUnlocked && (
-        <section
-          id="modular-paywall"
-          aria-label="Konstruktor pakietu raportu 2027"
-          className="no-print mt-8"
-        >
-          {/* Curiosity Blurred Cards */}
-          <div className="mb-6">
-            <h2 className="font-display text-2xl font-medium text-white sm:text-3xl">
-              Co jeszcze kryje Twoja matryca na 2027 rok?
-            </h2>
-            <p className="mt-1.5 text-sm text-[#9A9AA3]">
-              Każdy odblokowany moduł zawiera 2-częściową diagnozę, 3 konkretne ruchy, listę czerwonych flag i dokładne okna dat.
-            </p>
-
-            <div className="mt-4 grid grid-cols-1 gap-3.5 md:grid-cols-2">
-              {lockedModules.map((mod) => {
-                const content = report.modules[mod.id];
-                const isSelected = selectedModules.includes(mod.id);
-                return (
-                  <article
-                    key={mod.id}
-                    className={`rounded-[22px] border p-5 transition-colors duration-150 ${
-                      isSelected
-                        ? 'border-[#FF5C35]/70 bg-[#171415]'
-                        : 'border-white/[0.08] bg-[#121215]'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-[#A1A1AA]">
-                        <Lock className="h-3.5 w-3.5 text-[#FF7B5A]" aria-hidden="true" />
-                        <span>
-                          {mod.shortTitle} · {content.scoreOutOf10}/10
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => toggleModule(mod.id)}
-                        aria-pressed={isSelected}
-                        className={`min-h-[32px] rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                          isSelected
-                            ? 'bg-[#FF5C35] text-white'
-                            : 'border border-white/15 bg-white/[0.04] text-[#D4D4DC] hover:text-white'
-                        }`}
-                      >
-                        {isSelected ? 'Wybrano' : '+ Dodaj'}
-                      </button>
-                    </div>
-
-                    <h3 className="font-display mt-3 text-base font-semibold leading-snug text-white">
-                      {content.teaserTitle}
-                    </h3>
-                    <p className="mt-2 text-xs leading-relaxed text-[#B4B4BE]">
-                      {content.teaserSnippet}
-                    </p>
-
-                    {/* Subtle blurred locked continuation */}
-                    <div
-                      aria-hidden="true"
-                      className="mt-3 select-none space-y-1.5 blur-[4.5px] opacity-45"
-                    >
-                      <p className="text-xs text-[#D4D4DC]">
-                        Kluczowy przedział dat wymaga weryfikacji warunków umowy oraz unikania pośpiechu w decyzjach.
-                      </p>
-                      <p className="text-xs text-[#9A9AA3]">
-                        1. Przygotuj plan działania przed szczytem kwartału · 2. Czerwone flagi i punkt kontrolny.
-                      </p>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* PICK & MIX MODULAR CHECKOUT BOX */}
-          <div className="rounded-[28px] border border-white/[0.12] bg-[#141418] p-5 sm:p-8">
-            <div className="flex flex-col justify-between gap-3 border-b border-white/[0.08] pb-5 sm:flex-row sm:items-center">
-              <div>
-                <h2 className="font-display text-xl font-semibold text-white sm:text-2xl">
-                  Skonfiguruj swój raport Solaris 2027
-                </h2>
-                <p className="mt-1 text-xs text-[#9A9AA3]">
-                  1 moduł: 14,99 zł · 2: 24,99 zł · 3: 32,99 zł · 4: 39,99 zł · Pełny pakiet: 44,99 zł
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={selectFullBundle}
-                className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full bg-[#E9D5FF] px-4 py-2 text-xs font-semibold text-[#111114] transition-opacity hover:opacity-90"
-              >
-                Zaznacz pełny pakiet (44,99 zł + .ics i PDF gratis)
-              </button>
-            </div>
-
-            {/* Active Downsell or Retention Discount Notice */}
-            {useDownsellOffer && downsellSecondsLeft > 0 && (
-              <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-[#4ADE80]/35 bg-[#4ADE80]/10 px-4 py-3 text-xs text-[#E4FBE9]">
-                <span>
-                  Aktywna oferta startowa: 1 wybrany moduł + 3 kluczowe daty za{' '}
-                  <strong className="font-mono">9,99 zł</strong> zamiast 14,99 zł.
-                </span>
-                <span className="font-mono shrink-0 font-semibold tabular-nums">
-                  {formatTimer(downsellSecondsLeft)}
-                </span>
-              </div>
-            )}
-
-            {hasRetentionDiscount && !useDownsellOffer && (
-              <div className="mt-4 rounded-xl border border-[#FF5C35]/40 bg-[#FF5C35]/10 px-4 py-3 text-xs text-[#FFD7CC]">
-                Rabat powrotny <strong className="font-mono">-20%</strong> na pełny pakiet jest aktywny (35,99 zł zamiast 44,99 zł).
-              </div>
-            )}
-
-            {/* Interactive Module Selector Rows */}
-            <div className="mt-5 space-y-2.5">
-              {lockedModules.map((mod) => {
-                const checked = selectedModules.includes(mod.id);
-                return (
-                  <label
-                    key={mod.id}
-                    className={`flex min-h-[58px] cursor-pointer items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition-colors ${
-                      checked
-                        ? 'border-[#D8B4FE]/60 bg-white/[0.06]'
-                        : 'border-white/[0.07] bg-[#101013] hover:border-white/20'
-                    }`}
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleModule(mod.id)}
-                        className="h-4 w-4 shrink-0 accent-[#FF5C35]"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white">{mod.title}</p>
-                        <p className="text-xs text-[#8E8E98]">{mod.tagline}</p>
-                      </div>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
-
-            {/* Order Bump for Partial Bundles */}
-            {!pricing.isFullBundle && pricing.moduleCount > 0 && (
-              <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#E9D5FF]/35 bg-[#E9D5FF]/[0.08] p-4 text-xs leading-relaxed text-[#EDE9FE]">
-                <input
-                  type="checkbox"
-                  checked={includeCalendarBump}
-                  onChange={(e) => setIncludeCalendarBump(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                />
-                <span>
-                  <strong className="font-semibold text-white">
-                    + Dodaj Kalendarz Złotych i Ryzykownych Dat 2027 do telefonu (Apple / Google Calendar)
-                  </strong>{' '}
-                  — tylko <span className="font-mono font-semibold text-[#D8B4FE]">9,99 zł</span>
-                </span>
-              </label>
-            )}
-
-            {pricing.isFullBundle && (
-              <div className="mt-4 flex items-center gap-2.5 rounded-2xl border border-[#4ADE80]/30 bg-[#4ADE80]/[0.08] px-4 py-3 text-xs text-[#DCFCE7]">
-                <Check className="h-4 w-4 shrink-0 text-[#4ADE80]" aria-hidden="true" />
-                <span>
-                  W pełnym pakiecie otrzymujesz <strong>GRATIS</strong> plik kalendarza .ics (12 okien) oraz wersję A4 PDF do wydruku.
-                </span>
-              </div>
-            )}
-
-            {/* Full Checkout Disclaimer (teksty-do-formularzy.md sekcja 1) */}
-            <p className="mt-5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[11px] leading-relaxed text-[#9A9AA3]">
-              {LEGAL_TEXTS.checkoutFullDisclaimer}
-            </p>
-
-            {/* Mandatory UNCHECKED Polish Legal Checkboxes (P0.7) */}
-            <div className="mt-4 space-y-2.5">
-              {/* Checkbox 1: 18+ & Regulamin & Polityka prywatności (REQUIRED) */}
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.08] bg-[#101013] p-3.5 text-[11px] leading-relaxed text-[#C4C4CE]">
-                <input
-                  type="checkbox"
-                  checked={termsAndAgeAccepted}
-                  onChange={(e) => {
-                    setTermsAndAgeAccepted(e.target.checked);
-                    if (checkoutError) setCheckoutError(null);
-                  }}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                />
-                <span>
-                  <strong className="text-[#FF7B5A]">*</strong> Mam ukończone 18 lat i akceptuję{' '}
-                  <a
-                    href="/regulamin"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      onOpenLegal('regulamin');
-                    }}
-                    className="text-white underline hover:text-[#FF7B5A]"
-                  >
-                    Regulamin
-                  </a>{' '}
-                  oraz zapoznałem/am się z{' '}
-                  <a
-                    href="/polityka-prywatnosci"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      onOpenLegal('polityka');
-                    }}
-                    className="text-white underline hover:text-[#FF7B5A]"
-                  >
-                    Polityką prywatności
-                  </a>
-                  .
-                </span>
-              </label>
-
-              {/* Checkbox 2: Immediate digital delivery & loss of right of withdrawal (REQUIRED) */}
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.08] bg-[#101013] p-3.5 text-[11px] leading-relaxed text-[#C4C4CE]">
-                <input
-                  type="checkbox"
-                  checked={waiverAccepted}
-                  onChange={(e) => {
-                    setWaiverAccepted(e.target.checked);
-                    if (checkoutError) setCheckoutError(null);
-                  }}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                />
-                <span>
-                  <strong className="text-[#FF7B5A]">*</strong> {LEGAL_TEXTS.checkbox2Withdrawal}
-                </span>
-              </label>
-
-              {/* Checkbox 3: Second person consent (REQUIRED ONLY in pair mode) */}
-              {report.mode === 'pair' && (
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.08] bg-[#101013] p-3.5 text-[11px] leading-relaxed text-[#C4C4CE]">
-                  <input
-                    type="checkbox"
-                    checked={secondPersonConsentAccepted}
-                    onChange={(e) => {
-                      setSecondPersonConsentAccepted(e.target.checked);
-                      if (checkoutError) setCheckoutError(null);
-                    }}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                  />
-                  <span>
-                    <strong className="text-[#FF7B5A]">*</strong> {LEGAL_TEXTS.checkbox3SecondPerson}
-                  </span>
-                </label>
-              )}
-
-              {/* Checkbox 4: Optional separate email marketing consent */}
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/[0.05] bg-white/[0.02] p-3 text-[11px] leading-relaxed text-[#9A9AA3]">
-                <input
-                  type="checkbox"
-                  checked={marketingConsent}
-                  onChange={(e) => setMarketingConsent(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF5C35]"
-                />
-                <span>{LEGAL_TEXTS.checkbox4Marketing} (opcjonalnie)</span>
-              </label>
-            </div>
-
-            {checkoutError && (
-              <p role="alert" className="mt-3 text-xs font-medium text-[#FF8566]">
-                {checkoutError}
-              </p>
-            )}
-
-            {/* Total + Exact Polish Legal Payment CTA: "Zamawiam i płacę [cena]" */}
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs text-[#8E8E98]">Do zapłaty brutto (jednorazowo · Stripe / BLIK / Karta)</p>
-                <p className="font-mono text-2xl font-bold tabular-nums text-white">
-                  {pricing.formattedFinalPln}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                disabled={isPaying}
-                onClick={handleCheckout}
-                className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#FF5C35] px-7 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#FF6E4B] disabled:opacity-50 sm:w-auto"
-              >
-                <span>
-                  {isPaying
-                    ? 'Przetwarzanie zamówienia...'
-                    : `Zamawiam i płacę ${pricing.formattedFinalPln}`}
-                </span>
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-
-            {/* Required 1-line Disclaimer + Stripe obligation notice directly beneath CTA */}
-            <div className="mt-3 space-y-1 text-[11px] leading-relaxed text-[#8E8E98]">
-              <p className="text-[#A1A1AA]">{LEGAL_TEXTS.underPayButtonDisclaimer}</p>
-              <p>{LEGAL_TEXTS.underPayButtonStripeNote}</p>
-            </div>
-
-            {/* Trust + Non-Buyer Graceful Rescue Trigger ("Дожим") */}
-            <div className="mt-5 flex flex-col items-center justify-between gap-3 border-t border-white/[0.07] pt-4 text-xs text-[#8E8E98] sm:flex-row">
-              <span className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4 text-[#4ADE80]" aria-hidden="true" />
-                <span>Natychmiastowy dostęp · Bez subskrypcji</span>
-              </span>
-
-              <button
-                type="button"
-                onClick={() => setShowExitRescueModal(true)}
-                className="min-h-[38px] font-medium text-[#C4C4CE] underline decoration-white/25 underline-offset-4 transition-colors hover:text-white"
-              >
-                Nie teraz — zapisz skrót na później
-              </button>
-            </div>
-          </div>
-        </section>
+        <ReportCheckoutSection
+          report={report}
+          availableModules={availableModules}
+          lockedModules={lockedModules}
+          selectedModules={selectedModules}
+          pricing={pricing}
+          includeCalendarBump={includeCalendarBump}
+          hasRetentionDiscount={hasRetentionDiscount}
+          useDownsellOffer={useDownsellOffer}
+          downsellSecondsLeft={downsellSecondsLeft}
+          termsAndAgeAccepted={termsAndAgeAccepted}
+          waiverAccepted={waiverAccepted}
+          secondPersonConsentAccepted={secondPersonConsentAccepted}
+          marketingConsent={marketingConsent}
+          checkoutEmail={checkoutEmail}
+          checkoutError={checkoutError}
+          isPaying={isPaying}
+          onChangeCheckoutEmail={(val) => {
+            setCheckoutEmail(val);
+            if (checkoutError) setCheckoutError(null);
+          }}
+          onSelectFullBundle={selectFullBundle}
+          onSelectSingleMode={selectSingleMode}
+          onToggleModule={toggleModule}
+          onFocusModuleFromPreview={focusModuleInPaywall}
+          onToggleCalendarBump={setIncludeCalendarBump}
+          onToggleTermsAndAge={(checked) => {
+            setTermsAndAgeAccepted(checked);
+            if (checkoutError) setCheckoutError(null);
+          }}
+          onToggleWaiver={(checked) => {
+            setWaiverAccepted(checked);
+            if (checkoutError) setCheckoutError(null);
+          }}
+          onToggleSecondPerson={(checked) => {
+            setSecondPersonConsentAccepted(checked);
+            if (checkoutError) setCheckoutError(null);
+          }}
+          onToggleMarketing={setMarketingConsent}
+          onCheckout={handleCheckout}
+          onOpenLegal={onOpenLegal}
+          onOpenExitRescue={() => setShowExitRescueModal(true)}
+        />
       )}
 
       {/* Report Bottom Disclaimer + Quiet Footer Action */}
@@ -1543,7 +1452,7 @@ export function ReportDashboard({
             <button
               type="button"
               onClick={() =>
-                document.getElementById('modular-paywall')?.scrollIntoView({ behavior: 'smooth' })
+                document.getElementById('checkout-panel')?.scrollIntoView({ behavior: 'smooth' })
               }
               className="inline-flex min-h-[40px] shrink-0 items-center justify-center rounded-full bg-[#FF5C35] px-4 py-2 text-xs font-semibold text-white"
             >

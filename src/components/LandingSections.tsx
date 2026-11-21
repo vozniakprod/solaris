@@ -7,10 +7,10 @@ import {
   type LegalDocId,
 } from '../data/legalDocuments';
 
-const PORTRAIT_IMG = '/src/assets/images/editorial_warsaw_portrait_1795221168412.jpg';
-const ARTICLE_FINANCE_IMG = '/src/assets/images/article_finance_2027_1795221167161.jpg';
-const ARTICLE_RELATIONS_IMG = '/src/assets/images/article_relations_2027_1795221168205.jpg';
-const ARTICLE_DECISIONS_IMG = '/src/assets/images/article_decisions_2027_1795221167714.jpg';
+import PORTRAIT_IMG from '../assets/images/editorial_warsaw_portrait_1795221168412.jpg';
+import ARTICLE_FINANCE_IMG from '../assets/images/article_finance_2027_1795221167161.jpg';
+import ARTICLE_RELATIONS_IMG from '../assets/images/article_relations_2027_1795221168205.jpg';
+import ARTICLE_DECISIONS_IMG from '../assets/images/article_decisions_2027_1795221167714.jpg';
 
 interface LandingSectionsProps {
   onStartFunnel: (mode: FunnelMode) => void;
@@ -622,8 +622,8 @@ export function LandingSections({
               </button>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-[#7D7D87]">
-              Sprzedawca: {SELLER_LEGAL_CONFIG.sellerName} · Adres: {SELLER_LEGAL_CONFIG.sellerAddress} ·{' '}
-              {SELLER_LEGAL_CONFIG.sellerNip}. Ceny w PLN brutto (od 14,99 zł do 44,99 zł za pełny pakiet).
+              Sprzedawca: {SELLER_LEGAL_CONFIG.sellerName} · Adres: {SELLER_LEGAL_CONFIG.sellerAddress}
+              {SELLER_LEGAL_CONFIG.sellerNip ? ` · ${SELLER_LEGAL_CONFIG.sellerNip}` : ''}. Ceny w PLN brutto (od 14,99 zł do 44,99 zł za pełny pakiet).
             </p>
           </div>
 

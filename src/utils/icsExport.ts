@@ -44,7 +44,7 @@ export function buildSolaris2027Ics(
     const prefix = ev.type === 'golden' ? '[ZŁOTE OKNO] ' : '[UWAGA] ';
     lines.push(
       'BEGIN:VEVENT',
-      `UID:${escapeIcsText(ev.id)}@solaris2027.pl`,
+      `UID:${escapeIcsText(ev.id)}@solaris27.pl`,
       `DTSTAMP:${nowStamp}`,
       `DTSTART;VALUE=DATE:${toIcsDate(ev.dateStart)}`,
       `DTEND;VALUE=DATE:${addOneDayIso(ev.dateEnd)}`,

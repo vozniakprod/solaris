@@ -1,0 +1,15 @@
+{
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/regulamin", "destination": "/api" },
+    { "source": "/polityka-prywatnosci", "destination": "/api" },
+    { "source": "/polityka-cookies", "destination": "/api" },
+    { "source": "/odstapienie", "destination": "/api" },
+    { "source": "/((?!api/|assets/|og-cover\\.jpg|favicon\\.ico).*)", "destination": "/index.html" }
+  ]
+}
