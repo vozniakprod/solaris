@@ -233,3 +233,122 @@ test('durable order confirmation and static HTML legal documents include require
   assert.ok(html.includes('§6. Odstąpienie od umowy'));
   assert.ok(html.includes('GeoNames.org'));
 });
+
+test('Stripe server helpers validate keys, session IDs, Checkout params, and HMAC webhook signatures', async () => {
+  const crypto = await import('node:crypto');
+  const {
+    buildStripeCheckoutFormParams,
+    getStripeRuntimeMode,
+    isValidStripeCheckoutSessionId,
+    parseModulesFromMetadata,
+    verifyStripeWebhookSignature,
+  } = await import('./stripeServer');
+
+  assert.equal(getStripeRuntimeMode(''), 'unconfigured');
+  assert.equal(getStripeRuntimeMode('sk_test_123456'), 'test');
+  assert.equal(getStripeRuntimeMode('sk_live_123456'), 'live');
+
+  assert.equal(isValidStripeCheckoutSessionId('cs_test_a1B2c3D4e5F6g7H8'), true);
+  assert.equal(isValidStripeCheckoutSessionId('../customers'), false);
+  assert.equal(isValidStripeCheckoutSessionId('invalid_id'), false);
+
+  const params = buildStripeCheckoutFormParams({
+    secretKey: 'sk_test_dummy',
+    amountGrosze: 2499,
+    productName: 'Solaris 2027 — Wybrane moduły (2)',
+    productDescription: 'Jednorazowa płatność',
+    successUrl: 'https://solaris2027.pl/?raport=abc&checkout=success&stripe_session_id={CHECKOUT_SESSION_ID}',
+    cancelUrl: 'https://solaris2027.pl/?raport=abc&checkout=cancelled',
+    metadata: {
+      sessionId: 'abc',
+      orderId: 'SOL-1234',
+      mode: 'pair',
+      personName: 'Anna',
+      modules: 'zgodnosc,finanse',
+      calendar: 'false',
+      pdf: 'false',
+      priceGrossPln: '24,99 zł',
+      isUpsell: 'false',
+    },
+  });
+  assert.equal(params.get('mode'), 'payment');
+  assert.equal(params.get('locale'), 'pl');
+  assert.equal(params.get('line_items[0][price_data][currency]'), 'pln');
+  assert.equal(params.get('line_items[0][price_data][unit_amount]'), '2499');
+  assert.equal(params.get('metadata[modules]'), 'zgodnosc,finanse');
+  assert.deepEqual(parseModulesFromMetadata('zgodnosc,finanse,invalid'), ['zgodnosc', 'finanse']);
+
+  // HMAC webhook signature verification (valid, key rotation, tampered, expired)
+  const secret = 'whsec_test_secret_123';
+  const body = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed' });
+  const now = 1700000000;
+  const sigHex = crypto.createHmac('sha256', secret).update(`${now}.${body}`, 'utf8').digest('hex');
+
+  assert.equal(verifyStripeWebhookSignature(body, `t=${now},v1=${sigHex}`, secret, now + 10), true);
+  // Key rotation header with two v1 entries
+  assert.equal(
+    verifyStripeWebhookSignature(body, `t=${now},v1=0000,v1=${sigHex}`, secret, now + 10),
+    true,
+  );
+  // Tampered body
+  assert.equal(verifyStripeWebhookSignature(body + ' ', `t=${now},v1=${sigHex}`, secret, now + 10), false);
+  // Expired timestamp (> 5 min replay)
+  assert.equal(verifyStripeWebhookSignature(body, `t=${now},v1=${sigHex}`, secret, now + 600), false);
+});
+
+test('OpenAI editorial engine enforces Polish safety rules, omits houses on unknown birth time, and falls back safely without key', async () => {
+  const {
+    buildOpenAITeaserPrompt,
+    buildOpenAIUnlockedModulesPrompt,
+    enrichTeaserWithOpenAI,
+    isOpenAIConfigured,
+    SOLARIS_EDITORIAL_SYSTEM_PROMPT,
+  } = await import('./openaiEditorial');
+
+  assert.equal(isOpenAIConfigured(''), false);
+  assert.equal(isOpenAIConfigured('sk-proj-example1234567890'), true);
+  assert.ok(SOLARIS_EDITORIAL_SYSTEM_PROMPT.includes('Nigdy nie udzielaj porad medycznych'));
+  assert.ok(SOLARIS_EDITORIAL_SYSTEM_PROMPT.includes('ascendencie'));
+
+  const base = computeDeterministicSolarisReport({
+    sessionId: 'openai-prompt-test',
+    mode: 'pair',
+    relationType: 'para',
+    person1: {
+      name: 'Anna',
+      birthDate: '15.05.1996',
+      birthTime: '',
+      timeUnknown: true,
+      city: 'Warszawa',
+    },
+    person2: {
+      name: 'Jan',
+      birthDate: '22.11.1994',
+      birthTime: '10:15',
+      timeUnknown: false,
+      city: 'Kraków',
+    },
+    quizAnswers: {
+      money: 'Chcę zwiększyć dochód i podnieść stawki',
+      crisis: 'Tnę straty od razu i szukam planu B',
+      priority: 'Niedopowiedzenia w ważnej relacji',
+      rhythm: 'Spokojny plan rozpisany na kwartały',
+      trigger: 'Brak konkretu i zmienianie zdania w ostatniej chwili',
+    },
+  });
+
+  const teaserPrompt = buildOpenAITeaserPrompt(base);
+  assert.ok(teaserPrompt.includes('Godzina urodzenia nie została podana'));
+  assert.ok(teaserPrompt.includes('Jan'));
+
+  const modulesPrompt = buildOpenAIUnlockedModulesPrompt(base, ['finanse', 'zgodnosc']);
+  assert.ok(modulesPrompt.includes('finanse'));
+  assert.ok(modulesPrompt.includes('zgodnosc'));
+
+  // Without API key, safely returns deterministic report unchanged
+  const unchanged = await enrichTeaserWithOpenAI(base, '');
+  assert.equal(unchanged.sessionId, base.sessionId);
+  assert.equal(unchanged.freeCoreVectorTitle, base.freeCoreVectorTitle);
+});
+
+

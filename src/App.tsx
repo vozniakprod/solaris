@@ -70,39 +70,126 @@ export default function App() {
   const [calcError, setCalcError] = useState<string | null>(null);
   const [legalDoc, setLegalDoc] = useState<LegalDocId | null>(null);
   const [cookieSettingsOpen, setCookieSettingsOpen] = useState(false);
+  const [paymentNotice, setPaymentNotice] = useState<{
+    type: 'verifying' | 'success' | 'cancelled' | 'error';
+    text: string;
+  } | null>(null);
 
-  // Server-authoritative session sync on load; strictly ignores `?paid=1` query params (P0.6)
+  // Server-authoritative session & Stripe return verification (strictly ignores `?paid=1`)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlSessionId = params.get('raport')?.trim();
+    const checkoutStatus = params.get('checkout')?.trim();
+    const stripeSessionId = params.get('stripe_session_id')?.trim();
     const targetSessionId = urlSessionId || persisted?.report.sessionId;
     if (!targetSessionId) return;
 
+    const cleanUrlParams = () => {
+      try {
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.delete('checkout');
+        nextUrl.searchParams.delete('stripe_session_id');
+        nextUrl.searchParams.delete('paid');
+        window.history.replaceState({}, '', `${nextUrl.pathname}${nextUrl.search}`);
+      } catch {
+        // ignore history API issues in sandboxed frames
+      }
+    };
+
     let cancelled = false;
     (async () => {
+      if (checkoutStatus === 'cancelled') {
+        setView('report');
+        setPaymentNotice({
+          type: 'cancelled',
+          text: 'Płatność w Stripe została anulowana — nie pobraliśmy żadnych środków. Możesz dokończyć wybór modułów w dowolnym momencie.',
+        });
+        cleanUrlParams();
+      }
+
+      // 1. Fetch server-authoritative report state if still in server memory
+      let serverReport: SolarisFullReport | null = null;
+      let serverUnlock: UnlockState | null = null;
       try {
         const res = await fetch(`/api/report/${encodeURIComponent(targetSessionId)}`);
-        if (!res.ok || cancelled) return;
-        const json = (await res.json()) as {
-          report?: SolarisFullReport;
-          unlockState?: UnlockState;
-        };
-        if (!json.report || !json.unlockState || cancelled) return;
-
-        setPersisted((prev) => ({
-          report: json.report!,
-          // Always trust server unlockState rather than client URL flags (?paid=1 is ignored!)
-          unlockState: {
-            ...INITIAL_UNLOCK,
-            ...json.unlockState!,
-          },
-          hasRetentionDiscount: prev?.hasRetentionDiscount ?? false,
-        }));
-        if (urlSessionId) {
-          setView('report');
+        if (res.ok && !cancelled) {
+          const json = (await res.json()) as {
+            report?: SolarisFullReport;
+            unlockState?: UnlockState;
+          };
+          if (json.report) serverReport = json.report;
+          if (json.unlockState) serverUnlock = { ...INITIAL_UNLOCK, ...json.unlockState };
         }
       } catch {
         // Keep local persisted state if server restarted
+      }
+
+      // 2. If returning from Stripe Checkout, verify payment_status === 'paid' directly on server
+      if (checkoutStatus === 'success' && stripeSessionId && !cancelled) {
+        setView('report');
+        setPaymentNotice({
+          type: 'verifying',
+          text: 'Potwierdzamy status Twojej płatności w Stripe...',
+        });
+        try {
+          const verifyRes = await fetch(
+            `/api/checkout/verify?sessionId=${encodeURIComponent(targetSessionId)}&stripe_session_id=${encodeURIComponent(stripeSessionId)}`,
+          );
+          const verifyJson = (await verifyRes.json()) as {
+            ok?: boolean;
+            verified?: boolean;
+            unlockState?: UnlockState;
+            report?: SolarisFullReport | null;
+            error?: string;
+          };
+          if (!cancelled) {
+            if (verifyRes.ok && verifyJson.verified && verifyJson.unlockState) {
+              serverUnlock = { ...INITIAL_UNLOCK, ...verifyJson.unlockState };
+              if (verifyJson.report) {
+                serverReport = verifyJson.report;
+              }
+              setPaymentNotice({
+                type: 'success',
+                text: 'Płatność potwierdzona przez Stripe. Wybrane moduły raportu Solaris 2027 są już odblokowane poniżej.',
+              });
+              cleanUrlParams();
+            } else if (verifyRes.ok && verifyJson.verified === false) {
+              setPaymentNotice({
+                type: 'error',
+                text: 'Płatność jest jeszcze przetwarzana przez operatora (np. BLIK/bank). Odśwież stronę za kilka sekund.',
+              });
+            } else {
+              setPaymentNotice({
+                type: 'error',
+                text: verifyJson.error || LEGAL_TEXTS.paymentFailedError,
+              });
+            }
+          }
+        } catch {
+          if (!cancelled) {
+            setPaymentNotice({
+              type: 'error',
+              text: 'Nie udało się połączyć z serwerem w celu weryfikacji płatności Stripe. Odśwież stronę za chwilę.',
+            });
+          }
+        }
+      }
+
+      if (cancelled) return;
+
+      if (serverReport || serverUnlock) {
+        setPersisted((prev) => {
+          const activeReport = serverReport ?? prev?.report;
+          if (!activeReport) return prev;
+          return {
+            report: activeReport,
+            unlockState: serverUnlock ?? prev?.unlockState ?? INITIAL_UNLOCK,
+            hasRetentionDiscount: prev?.hasRetentionDiscount ?? false,
+          };
+        });
+        if (urlSessionId) {
+          setView('report');
+        }
       }
     })();
 
@@ -190,6 +277,16 @@ export default function App() {
         unlockState: json.unlockState ? { ...INITIAL_UNLOCK, ...json.unlockState } : INITIAL_UNLOCK,
         hasRetentionDiscount: false,
       });
+      setPaymentNotice(null);
+      try {
+        window.history.replaceState(
+          {},
+          '',
+          `/?raport=${encodeURIComponent(json.report.sessionId)}`,
+        );
+      } catch {
+        // ignore
+      }
       setView('report');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -322,9 +419,17 @@ export default function App() {
           report={persisted.report}
           unlockState={persisted.unlockState}
           hasRetentionDiscount={persisted.hasRetentionDiscount}
-          onUnlockSuccess={(nextUnlock) =>
+          paymentNotice={paymentNotice}
+          onDismissPaymentNotice={() => setPaymentNotice(null)}
+          onUnlockSuccess={(nextUnlock, updatedReport) =>
             setPersisted((prev) =>
-              prev ? { ...prev, unlockState: nextUnlock } : prev,
+              prev
+                ? {
+                    ...prev,
+                    report: updatedReport ?? prev.report,
+                    unlockState: nextUnlock,
+                  }
+                : prev,
             )
           }
           onActivateRetentionDiscount={() =>
@@ -337,9 +442,11 @@ export default function App() {
           onStartFresh={() => {
             try {
               window.localStorage.removeItem(FORM_DRAFT_STORAGE_KEY);
+              window.history.replaceState({}, '', '/');
             } catch {
               // ignore
             }
+            setPaymentNotice(null);
             setPersisted(null);
             setView('funnel');
             window.scrollTo({ top: 0, behavior: 'smooth' });

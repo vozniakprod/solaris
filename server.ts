@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express, { type Request } from 'express';
-import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import {
   computeDeterministicSolarisReport,
   type PersonInput,
@@ -12,8 +11,11 @@ import {
 } from './src/utils/ephemerisEngine';
 import {
   calculateModularPricing,
+  formatPlnFromGrosze,
   type FunnelMode,
+  getAvailableModulesForMode,
   isValidEmailAddress,
+  POST_PURCHASE_UPSELL_GROSZE,
   type RelationType,
   type ReportModuleId,
   validateBirthTime,
@@ -32,6 +34,21 @@ import {
   SELLER_LEGAL_CONFIG,
   type DurableOrderConfirmation,
 } from './src/data/legalDocuments';
+import {
+  createStripeCheckoutSession,
+  diagnoseStripeSecretKey,
+  getStripeRuntimeMode,
+  isValidStripeCheckoutSessionId,
+  normalizeStripeEnvValue,
+  parseModulesFromMetadata,
+  retrieveStripeCheckoutSession,
+  type StripeCheckoutSessionObject,
+  verifyStripeWebhookSignature,
+} from './src/utils/stripeServer';
+import {
+  enrichTeaserWithOpenAI,
+  enrichUnlockedModulesWithOpenAI,
+} from './src/utils/openaiEditorial';
 
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
@@ -49,12 +66,15 @@ interface ServerUnlockRecord {
 interface StoredSession {
   report: SolarisFullReport;
   unlockState: ServerUnlockRecord;
+  aiEnrichedModules: Set<ReportModuleId>;
 }
 
 interface ConsentAuditRecord {
   timestamp: string;
   sessionId: string;
   orderId: string;
+  stripeSessionId: string | null;
+  status: 'checkout_created' | 'paid';
   regulaminVersion: string;
   ipHash: string;
   termsAndAgeAccepted: boolean;
@@ -63,10 +83,11 @@ interface ConsentAuditRecord {
   marketingConsent: boolean;
 }
 
-// In-memory stores for sessions, server-verified unlocks, consent audit logs, and Stripe webhook idempotency
+// In-memory stores for sessions, server-verified unlocks, consent audit logs, and Stripe idempotency
 const sessionStore = new Map<string, StoredSession>();
 const consentAuditLog: ConsentAuditRecord[] = [];
 const processedStripeEvents = new Set<string>();
+const verifiedStripeSessions = new Map<string, ServerUnlockRecord>();
 const followUpLeads: Array<{
   email: string;
   sessionId: string;
@@ -74,6 +95,10 @@ const followUpLeads: Array<{
   ipHash: string;
   savedAt: string;
 }> = [];
+
+// Auto-generated cryptographic salt for one-way IP hashing (no manual configuration needed)
+const RUNTIME_IP_HASH_SALT =
+  process.env.IP_HASH_SALT?.trim() || crypto.randomBytes(32).toString('hex');
 
 // Lightweight sliding-window per-IP rate limiter
 const rateLimitBuckets = new Map<string, { count: number; resetAtMs: number }>();
@@ -87,8 +112,11 @@ function getClientIp(req: Request): string {
 }
 
 function hashIp(ip: string): string {
-  const salt = process.env.IP_HASH_SALT || 'solaris-2027-consent-salt';
-  return crypto.createHash('sha256').update(`${salt}:${ip}`).digest('hex').slice(0, 32);
+  return crypto
+    .createHash('sha256')
+    .update(`${RUNTIME_IP_HASH_SALT}:${ip}`)
+    .digest('hex')
+    .slice(0, 32);
 }
 
 function checkRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
@@ -105,166 +133,91 @@ function checkRateLimit(key: string, maxRequests: number, windowMs: number): boo
   return true;
 }
 
-function verifyStripeSignature(
-  rawBody: string,
-  signatureHeader: string | undefined,
-  secret: string,
-): boolean {
-  if (!signatureHeader || !secret) return false;
-  const parts = Object.fromEntries(
-    signatureHeader.split(',').map((pair) => {
-      const [k, v] = pair.split('=');
-      return [k?.trim(), v?.trim()];
-    }),
-  );
-  const timestamp = parts.t;
-  const v1 = parts.v1;
-  if (!timestamp || !v1) return false;
+function applyVerifiedStripeUnlock(
+  stripeSession: StripeCheckoutSessionObject,
+  baseUrl: string,
+): ServerUnlockRecord | null {
+  const meta = stripeSession.metadata;
+  const sessionId = meta?.sessionId?.trim();
+  if (!sessionId) return null;
 
-  // Reject replay older than 5 minutes
-  const tsNum = Number(timestamp);
-  if (!Number.isFinite(tsNum) || Math.abs(Date.now() / 1000 - tsNum) > 300) {
-    return false;
-  }
+  const modules = parseModulesFromMetadata(meta?.modules);
+  const mode: FunnelMode = meta?.mode === 'pair' ? 'pair' : 'solo';
+  const stored = sessionStore.get(sessionId);
+  const personName = stored?.report.person1.name || meta?.personName || 'Kliencie';
+  const orderId =
+    meta?.orderId ||
+    stripeSession.id ||
+    `SOL-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  const priceGrossPln =
+    meta?.priceGrossPln ||
+    (typeof stripeSession.amount_total === 'number'
+      ? formatPlnFromGrosze(stripeSession.amount_total)
+      : '14,99 zł');
 
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(`${timestamp}.${rawBody}`, 'utf8')
-    .digest('hex');
-
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(v1, 'hex'));
-  } catch {
-    return false;
-  }
-}
-
-function getGeminiClient(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  if (!key || key === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey: key,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
+  const confirmation = buildDurableOrderConfirmation({
+    orderId,
+    personName,
+    mode,
+    priceGrossPln,
+    sessionId,
+    baseUrl,
   });
+
+  const prev = stored?.unlockState;
+  const nextUnlock: ServerUnlockRecord = {
+    paid: true,
+    unlockedModules: Array.from(new Set([...(prev?.unlockedModules ?? []), ...modules])),
+    calendarUnlocked: (prev?.calendarUnlocked ?? false) || meta?.calendar === 'true',
+    pdfUnlocked: (prev?.pdfUnlocked ?? false) || meta?.pdf === 'true',
+    orderId,
+    firstPurchaseAtMs: prev?.firstPurchaseAtMs ?? Date.now(),
+    confirmation,
+  };
+
+  if (stored) {
+    stored.unlockState = nextUnlock;
+  }
+  verifiedStripeSessions.set(stripeSession.id, nextUnlock);
+
+  // Mark matching consent audit entry as paid
+  for (let i = consentAuditLog.length - 1; i >= 0; i -= 1) {
+    const rec = consentAuditLog[i];
+    if (rec.stripeSessionId === stripeSession.id || rec.orderId === orderId) {
+      rec.status = 'paid';
+      break;
+    }
+  }
+
+  return nextUnlock;
 }
 
 async function enrichTeaserWithEditorialEngine(
   report: SolarisFullReport,
 ): Promise<SolarisFullReport> {
-  const ai = getGeminiClient();
-  if (!ai) {
-    return report;
-  }
+  return enrichTeaserWithOpenAI(
+    report,
+    process.env.OPENAI_API_KEY,
+    process.env.OPENAI_MODEL,
+  );
+}
 
-  const prompt = [
-    `Napisz krótkie, wspierające i konkretne teksty po polsku do raportu Solaris 2027.`,
-    `STYL: redaktor nowoczesnego polskiego magazynu (Wysokie Obcasy / Noizz). Bez ezoterycznej patetyki (bez słów "magia", "wszechświat", "odkryj siebie").`,
-    `ZASADY BEZPIECZEŃSTWA TREŚCI (OBOWIĄZKOWE):`,
-    `- ZAKAZ porad medycznych, prawnych, finansowych i inwestycyjnych (nie pisz "kup", "sprzedaj", "rzuć partnera", "zmień pracę", żadnych diagnoz).`,
-    `- ZAKAZ straszenia i dat nieuchronnych zdarzeń. Używaj wyłącznie obliczonych okresów z danych poniżej, z ostrożnymi sformułowaniami ("możliwy okres", "warto zwrócić uwagę", "sprzyjający moment na rozmowę").`,
-    report.ephemeris.omittedTimeDependentElements
-      ? `- UWAGA: godzina urodzenia nie została podana — nie odnosić się do ascendentu ani domów astrologicznych.`
-      : ``,
-    `DANE OBLICZENIOWE: Imię: ${report.person1.name}, Słońce: ${report.ephemeris.natalSunDeg}° ${report.ephemeris.natalSunSignPl}, Solariusz 2027: ${report.ephemeris.solarReturnDisplayPl}, Jowisz: ${report.ephemeris.jupiterSignPl}, Saturn: ${report.ephemeris.saturnSignPl}, Wenus: ${report.ephemeris.venusSignPl}, Miesiąc wzrostu: ${report.peakMonthPl}, Miesiąc ostrożności: ${report.riskMonthPl}.`,
-    report.mode === 'pair' && report.person2
-      ? `TRYB PARY (${report.relationType}): Druga osoba: ${report.person2.name}, Indeks zgodności: ${report.compatibilityScore}%.`
-      : `TRYB SOLO.`,
-    `PROFIL Z QUIZU: Pieniądze: ${report.quizAnswers.money}; Kryzys: ${report.quizAnswers.crisis}; Priorytet: ${report.quizAnswers.priority}; Rytm: ${report.quizAnswers.rhythm}; Wyzwalacz: ${report.quizAnswers.trigger}.`,
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  try {
-    const timeoutMs = 5500;
-    const response = await Promise.race([
-      ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
-        contents: prompt,
-        config: {
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          maxOutputTokens: 900,
-          systemInstruction:
-            'Piszesz jak redaktor nowoczesnego polskiego magazynu: konkretnie, wspierająco, bez ezoterycznej patetyki. Nigdy nie udzielaj porad medycznych, prawnych ani finansowych, nie strasz i nie wymyślaj dat spoza danych wejściowych. Używaj sformułowań warunkowych ("możliwy okres", "warto zwrócić uwagę"). Zwracaj wyłącznie poprawny JSON zgodny ze schematem.',
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              freeCoreVectorTitle: { type: Type.STRING },
-              freeCoreVectorBody: { type: Type.STRING },
-              freeOpenInsightTitle: { type: Type.STRING },
-              freeOpenInsightBody: { type: Type.STRING },
-              compatibilityFreeInsight: { type: Type.STRING },
-              finanseTeaserTitle: { type: Type.STRING },
-              relacjeTeaserTitle: { type: Type.STRING },
-              energiaTeaserTitle: { type: Type.STRING },
-              zmianyTeaserTitle: { type: Type.STRING },
-              zgodnoscTeaserTitle: { type: Type.STRING },
-            },
-            required: [
-              'freeCoreVectorTitle',
-              'freeCoreVectorBody',
-              'freeOpenInsightTitle',
-              'freeOpenInsightBody',
-              'finanseTeaserTitle',
-              'relacjeTeaserTitle',
-              'energiaTeaserTitle',
-              'zmianyTeaserTitle',
-            ],
-          },
-        },
-      }),
-      new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), timeoutMs);
-      }),
-    ]);
-
-    if (!response) {
-      return report;
-    }
-
-    const rawText = (response.text ?? '').trim();
-    if (!rawText) return report;
-    const parsed = JSON.parse(rawText) as Record<string, string>;
-
-    const nextModules = { ...report.modules };
-    if (parsed.finanseTeaserTitle) {
-      nextModules.finanse = { ...nextModules.finanse, teaserTitle: parsed.finanseTeaserTitle };
-    }
-    if (parsed.relacjeTeaserTitle) {
-      nextModules.relacje = { ...nextModules.relacje, teaserTitle: parsed.relacjeTeaserTitle };
-    }
-    if (parsed.energiaTeaserTitle) {
-      nextModules.energia = { ...nextModules.energia, teaserTitle: parsed.energiaTeaserTitle };
-    }
-    if (parsed.zmianyTeaserTitle) {
-      nextModules.zmiany = { ...nextModules.zmiany, teaserTitle: parsed.zmianyTeaserTitle };
-    }
-    if (parsed.zgodnoscTeaserTitle && report.mode === 'pair') {
-      nextModules.zgodnosc = { ...nextModules.zgodnosc, teaserTitle: parsed.zgodnoscTeaserTitle };
-    }
-
-    return {
-      ...report,
-      freeCoreVectorTitle: parsed.freeCoreVectorTitle || report.freeCoreVectorTitle,
-      freeCoreVectorBody: parsed.freeCoreVectorBody || report.freeCoreVectorBody,
-      freeOpenInsightTitle: parsed.freeOpenInsightTitle || report.freeOpenInsightTitle,
-      freeOpenInsightBody: parsed.freeOpenInsightBody || report.freeOpenInsightBody,
-      compatibilityFreeInsight:
-        report.mode === 'pair' && parsed.compatibilityFreeInsight
-          ? parsed.compatibilityFreeInsight
-          : report.compatibilityFreeInsight,
-      modules: nextModules,
-      sourceEngine: 'ephemeris-editorial',
-    };
-  } catch (err) {
-    console.warn('[Solaris editorial engine fallback]:', err instanceof Error ? err.message : err);
-    return report;
+async function ensureUnlockedModulesEnriched(sessionId: string): Promise<void> {
+  const stored = sessionStore.get(sessionId);
+  if (!stored || !stored.unlockState.paid) return;
+  const pending = stored.unlockState.unlockedModules.filter(
+    (m) => !stored.aiEnrichedModules.has(m),
+  );
+  if (pending.length === 0) return;
+  const enriched = await enrichUnlockedModulesWithOpenAI(
+    stored.report,
+    pending,
+    process.env.OPENAI_API_KEY,
+    process.env.OPENAI_MODEL,
+  );
+  stored.report = enriched;
+  for (const m of pending) {
+    stored.aiEnrichedModules.add(m);
   }
 }
 
@@ -376,7 +329,7 @@ async function startServer() {
     '/api/webhooks/stripe',
     express.raw({ type: 'application/json', limit: '256kb' }),
     (req, res) => {
-      const secret = process.env.STRIPE_WEBHOOK_SECRET?.trim() || '';
+      const secret = normalizeStripeEnvValue(process.env.STRIPE_WEBHOOK_SECRET);
       const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
       const sig = req.headers['stripe-signature'] as string | undefined;
 
@@ -386,7 +339,7 @@ async function startServer() {
         });
       }
 
-      if (!verifyStripeSignature(rawBody, sig, secret)) {
+      if (!verifyStripeWebhookSignature(rawBody, sig, secret)) {
         return res.status(400).json({ error: 'Invalid Stripe-Signature header.' });
       }
 
@@ -395,16 +348,7 @@ async function startServer() {
           id?: string;
           type?: string;
           data?: {
-            object?: {
-              id?: string;
-              metadata?: {
-                sessionId?: string;
-                modules?: string;
-                calendar?: string;
-                pdf?: string;
-                priceGrossPln?: string;
-              };
-            };
+            object?: StripeCheckoutSessionObject;
           };
         };
 
@@ -413,43 +357,13 @@ async function startServer() {
         }
         processedStripeEvents.add(event.id);
 
-        if (event.type === 'checkout.session.completed') {
+        if (
+          event.type === 'checkout.session.completed' ||
+          event.type === 'checkout.session.async_payment_succeeded'
+        ) {
           const obj = event.data?.object;
-          const sessionId = obj?.metadata?.sessionId;
-          if (sessionId && sessionStore.has(sessionId)) {
-            const stored = sessionStore.get(sessionId)!;
-            const allowed: Set<string> = new Set([
-              'finanse',
-              'relacje',
-              'energia',
-              'zmiany',
-              'zgodnosc',
-            ]);
-            const modules = (obj?.metadata?.modules || '')
-              .split(',')
-              .filter((m): m is ReportModuleId => allowed.has(m));
-            const orderId = obj?.id || `SOL-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-            const confirmation = buildDurableOrderConfirmation({
-              orderId,
-              personName: stored.report.person1.name,
-              mode: stored.report.mode,
-              priceGrossPln: obj?.metadata?.priceGrossPln || '14,99 zł',
-              sessionId,
-              baseUrl: getBaseUrl(req),
-            });
-
-            stored.unlockState = {
-              paid: true,
-              unlockedModules: Array.from(
-                new Set([...stored.unlockState.unlockedModules, ...modules]),
-              ),
-              calendarUnlocked:
-                stored.unlockState.calendarUnlocked || obj?.metadata?.calendar === 'true',
-              pdfUnlocked: stored.unlockState.pdfUnlocked || obj?.metadata?.pdf === 'true',
-              orderId,
-              firstPurchaseAtMs: stored.unlockState.firstPurchaseAtMs ?? Date.now(),
-              confirmation,
-            };
+          if (obj && obj.payment_status === 'paid') {
+            applyVerifiedStripeUnlock(obj, getBaseUrl(req));
           }
         }
 
@@ -479,6 +393,104 @@ async function startServer() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, service: 'solaris-2027' });
+  });
+
+  // Safe non-secret Stripe runtime availability for client
+  app.get('/api/payments/config', (_req, res) => {
+    const mode = getStripeRuntimeMode(process.env.STRIPE_SECRET_KEY);
+    res.json({
+      stripeEnabled: mode !== 'unconfigured',
+      mode,
+    });
+  });
+
+  // Server-side verification of a completed Stripe Checkout Session (never trusts ?paid=1!)
+  app.get('/api/checkout/verify', async (req, res) => {
+    const stripeSecretKey = normalizeStripeEnvValue(process.env.STRIPE_SECRET_KEY);
+    if (getStripeRuntimeMode(stripeSecretKey) === 'unconfigured') {
+      return res.status(503).json({
+        code: 'STRIPE_NOT_CONFIGURED',
+        error: 'Płatności Stripe nie są skonfigurowane na serwerze.',
+      });
+    }
+
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId.trim().slice(0, 64) : '';
+    const stripeSessionId =
+      typeof req.query.stripe_session_id === 'string'
+        ? req.query.stripe_session_id.trim().slice(0, 128)
+        : '';
+
+    if (!sessionId || !isValidStripeCheckoutSessionId(stripeSessionId)) {
+      return res.status(400).json({
+        code: 'VALIDATION_ERROR',
+        error: 'Brak prawidłowego identyfikatora sesji płatności Stripe.',
+      });
+    }
+
+    // Fast path if already verified via webhook or earlier poll
+    const cached = verifiedStripeSessions.get(stripeSessionId);
+    if (cached) {
+      await ensureUnlockedModulesEnriched(sessionId);
+      const stored = sessionStore.get(sessionId);
+      return res.json({
+        ok: true,
+        verified: true,
+        paymentStatus: 'paid',
+        unlockState: stored?.unlockState ?? cached,
+        report: stored?.report ?? null,
+      });
+    }
+
+    try {
+      const lookup = await retrieveStripeCheckoutSession(stripeSessionId, stripeSecretKey);
+      if (!lookup.ok) {
+        return res.status(lookup.status).json({
+          code: 'STRIPE_LOOKUP_ERROR',
+          error: lookup.error,
+        });
+      }
+
+      const stripeSession = lookup.session;
+      if (stripeSession.metadata?.sessionId !== sessionId) {
+        return res.status(403).json({
+          code: 'SESSION_MISMATCH',
+          error: 'Sesja płatności nie pasuje do tego raportu.',
+        });
+      }
+
+      if (stripeSession.payment_status !== 'paid') {
+        return res.json({
+          ok: true,
+          verified: false,
+          paymentStatus: stripeSession.payment_status,
+        });
+      }
+
+      const unlockState = applyVerifiedStripeUnlock(stripeSession, getBaseUrl(req));
+      if (!unlockState) {
+        return res.status(500).json({
+          code: 'UNLOCK_ERROR',
+          error: 'Płatność została potwierdzona, ale nie udało się zaktualizować stanu raportu.',
+        });
+      }
+
+      await ensureUnlockedModulesEnriched(sessionId);
+      const stored = sessionStore.get(sessionId);
+
+      return res.json({
+        ok: true,
+        verified: true,
+        paymentStatus: 'paid',
+        unlockState,
+        report: stored?.report ?? null,
+      });
+    } catch (err) {
+      console.error('[GET /api/checkout/verify]', err);
+      return res.status(502).json({
+        code: 'STRIPE_NETWORK_ERROR',
+        error: 'Nie udało się połączyć ze Stripe w celu potwierdzenia płatności. Odśwież stronę za chwilę.',
+      });
+    }
   });
 
   // Autocomplete endpoint returning structured place records with IANA timezone
@@ -577,7 +589,11 @@ async function startServer() {
         confirmation: null,
       };
 
-      sessionStore.set(sessionId, { report, unlockState: initialUnlock });
+      sessionStore.set(sessionId, {
+        report,
+        unlockState: initialUnlock,
+        aiEnrichedModules: new Set<ReportModuleId>(),
+      });
 
       return res.json({ report, unlockState: initialUnlock });
     } catch (err) {
@@ -589,7 +605,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/report/unlock', (req, res) => {
+  const handleCreateCheckoutSession = async (req: Request, res: express.Response) => {
     const ip = getClientIp(req);
     if (!checkRateLimit(`unlock:${ip}`, 25, 15 * 60 * 1000)) {
       return res.status(429).json({
@@ -611,7 +627,8 @@ async function startServer() {
     if (!termsAndAgeAccepted) {
       return res.status(400).json({
         code: 'CONSENT_REQUIRED',
-        error: 'Zaznacz potwierdzenie ukończenia 18 lat oraz akceptację Regulaminu i Polityki prywatności.',
+        error:
+          'Zaznacz potwierdzenie ukończenia 18 lat oraz akceptację Regulaminu i Polityki prywatności.',
       });
     }
 
@@ -644,73 +661,145 @@ async function startServer() {
       });
     }
 
-    const pricing = calculateModularPricing({
-      mode,
-      selectedModules,
-      includeCalendarBump: Boolean(body.includeCalendarBump),
-      hasRetentionDiscount: Boolean(body.hasRetentionDiscount),
-      useDownsellOffer: Boolean(body.useDownsellOffer),
-    });
-
-    const orderId = `SOL-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-    const stored = sessionStore.get(sessionId);
-    const personName = stored?.report.person1.name || (typeof body.personName === 'string' ? body.personName.slice(0, 60) : 'Kliencie');
-
-    // Audit consent record (timestamp + regulamin version + one-way IP hash)
-    consentAuditLog.push({
-      timestamp: new Date().toISOString(),
-      sessionId: sessionId || 'unknown',
-      orderId,
-      regulaminVersion: SELLER_LEGAL_CONFIG.regulaminVersion,
-      ipHash: hashIp(ip),
-      termsAndAgeAccepted,
-      withdrawalWaiverAccepted,
-      secondPersonConsentAccepted: mode === 'pair' ? secondPersonConsentAccepted : null,
-      marketingConsent,
-    });
-
-    const calendarUnlocked =
-      pricing.includesFreeCalendarAndPdf ||
-      Boolean(body.includeCalendarBump) ||
-      Boolean(body.useDownsellOffer);
-    const pdfUnlocked = pricing.includesFreeCalendarAndPdf;
-
-    const confirmation = buildDurableOrderConfirmation({
-      orderId,
-      personName,
-      mode,
-      priceGrossPln: pricing.formattedFinalPln,
-      sessionId: sessionId || orderId,
-      baseUrl: getBaseUrl(req),
-    });
-
-    const nextUnlock: ServerUnlockRecord = {
-      paid: true,
-      unlockedModules: stored
-        ? Array.from(new Set([...stored.unlockState.unlockedModules, ...selectedModules]))
-        : selectedModules,
-      calendarUnlocked: (stored?.unlockState.calendarUnlocked ?? false) || calendarUnlocked,
-      pdfUnlocked: (stored?.unlockState.pdfUnlocked ?? false) || pdfUnlocked,
-      orderId,
-      firstPurchaseAtMs: stored?.unlockState.firstPurchaseAtMs ?? Date.now(),
-      confirmation,
-    };
-
-    if (stored) {
-      stored.unlockState = nextUnlock;
+    const stripeSecretKey = normalizeStripeEnvValue(process.env.STRIPE_SECRET_KEY);
+    const secretKeyStatus = diagnoseStripeSecretKey(stripeSecretKey);
+    const stripeMode = getStripeRuntimeMode(stripeSecretKey);
+    if (stripeMode === 'unconfigured') {
+      console.error(`[Stripe config] Cannot create Checkout Session: secretKeyStatus=${secretKeyStatus}`);
+      return res.status(503).json({
+        code: 'STRIPE_NOT_CONFIGURED',
+        error: 'Płatności online są chwilowo niedostępne. Spróbuj ponownie za chwilę lub napisz na kontakt@solaris2027.pl.',
+      });
     }
 
-    return res.json({
-      ok: true,
-      paid: true,
-      orderId,
-      unlockedModules: nextUnlock.unlockedModules,
-      calendarUnlocked: nextUnlock.calendarUnlocked,
-      pdfUnlocked: nextUnlock.pdfUnlocked,
-      paidPln: pricing.formattedFinalPln,
-      confirmation,
-    });
-  });
+    const stored = sessionStore.get(sessionId);
+    const personName =
+      stored?.report.person1.name ||
+      (typeof body.personName === 'string' && body.personName.trim()
+        ? body.personName.trim().slice(0, 60)
+        : 'Kliencie');
+
+    // Server-side price calculation (never trusts client amounts; verifies 15-min upsell window)
+    const isRequestedUpsell = body.isUpsell === true;
+    const isEligibleUpsell =
+      isRequestedUpsell &&
+      Boolean(stored?.unlockState.paid) &&
+      typeof stored?.unlockState.firstPurchaseAtMs === 'number' &&
+      Date.now() - stored.unlockState.firstPurchaseAtMs <= 15 * 60 * 1000;
+
+    let amountGrosze: number;
+    let formattedPricePln: string;
+    let finalModules: ReportModuleId[];
+    let calendarIncluded: boolean;
+    let pdfIncluded: boolean;
+    let productName: string;
+    let productDescription: string;
+
+    if (isEligibleUpsell) {
+      amountGrosze = POST_PURCHASE_UPSELL_GROSZE;
+      formattedPricePln = formatPlnFromGrosze(POST_PURCHASE_UPSELL_GROSZE);
+      finalModules = getAvailableModulesForMode(mode).map((m) => m.id);
+      calendarIncluded = true;
+      pdfIncluded = true;
+      productName =
+        mode === 'pair'
+          ? 'Solaris 2027 — Rozszerzenie do Pełnego Pakietu dla Dwojga'
+          : 'Solaris 2027 — Rozszerzenie do Pełnego Pakietu Solo';
+      productDescription =
+        'Odblokowanie wszystkich pozostałych modułów raportu 2027 + eksport PDF A4 i kalendarz .ics.';
+    } else {
+      const pricing = calculateModularPricing({
+        mode,
+        selectedModules,
+        includeCalendarBump: Boolean(body.includeCalendarBump),
+        hasRetentionDiscount: Boolean(body.hasRetentionDiscount),
+        useDownsellOffer: Boolean(body.useDownsellOffer),
+      });
+      amountGrosze = pricing.finalPriceGrosze;
+      formattedPricePln = pricing.formattedFinalPln;
+      finalModules = selectedModules;
+      calendarIncluded =
+        pricing.includesFreeCalendarAndPdf ||
+        Boolean(body.includeCalendarBump) ||
+        Boolean(body.useDownsellOffer);
+      pdfIncluded = pricing.includesFreeCalendarAndPdf;
+      productName = pricing.isFullBundle
+        ? mode === 'pair'
+          ? 'Solaris 2027 — Pełny Pakiet dla Dwojga (5 modułów + PDF + .ics)'
+          : 'Solaris 2027 — Pełny Pakiet Solo (4 moduły + PDF + .ics)'
+        : `Solaris 2027 — Wybrane moduły (${finalModules.length})${calendarIncluded ? ' + Kalendarz .ics' : ''}`;
+      productDescription = `Spersonalizowany raport Solariusza 2027 (${mode === 'pair' ? 'Dla dwojga' : 'Solo'}). Jednorazowa płatność, bez subskrypcji.`;
+    }
+
+    const orderId = `SOL-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const baseUrl = getBaseUrl(req);
+    const effectiveSessionId = sessionId || orderId;
+
+    try {
+      const stripeRes = await createStripeCheckoutSession({
+        secretKey: stripeSecretKey,
+        amountGrosze,
+        productName,
+        productDescription,
+        successUrl: `${baseUrl}/?raport=${encodeURIComponent(effectiveSessionId)}&checkout=success&stripe_session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${baseUrl}/?raport=${encodeURIComponent(effectiveSessionId)}&checkout=cancelled`,
+        metadata: {
+          sessionId: effectiveSessionId,
+          orderId,
+          mode,
+          personName,
+          modules: finalModules.join(','),
+          calendar: calendarIncluded ? 'true' : 'false',
+          pdf: pdfIncluded ? 'true' : 'false',
+          priceGrossPln: formattedPricePln,
+          isUpsell: isEligibleUpsell ? 'true' : 'false',
+        },
+        idempotencyKey: orderId,
+      });
+
+      if (!stripeRes.ok) {
+        console.error('[Stripe Checkout error]:', stripeRes.error);
+        return res.status(stripeRes.status >= 400 && stripeRes.status < 600 ? stripeRes.status : 502).json({
+          code: 'STRIPE_CHECKOUT_ERROR',
+          error: `${LEGAL_TEXTS.paymentFailedError} (${stripeRes.error})`,
+        });
+      }
+
+      // Record consent audit log BEFORE redirect (status upgrades to 'paid' upon webhook/verify)
+      consentAuditLog.push({
+        timestamp: new Date().toISOString(),
+        sessionId: effectiveSessionId,
+        orderId,
+        stripeSessionId: stripeRes.session.id,
+        status: 'checkout_created',
+        regulaminVersion: SELLER_LEGAL_CONFIG.regulaminVersion,
+        ipHash: hashIp(ip),
+        termsAndAgeAccepted,
+        withdrawalWaiverAccepted,
+        secondPersonConsentAccepted: mode === 'pair' ? secondPersonConsentAccepted : null,
+        marketingConsent,
+      });
+
+      return res.json({
+        ok: true,
+        requiresRedirect: true,
+        checkoutUrl: stripeRes.session.url,
+        stripeSessionId: stripeRes.session.id,
+        stripeMode,
+        orderId,
+        amountPln: formattedPricePln,
+      });
+    } catch (err) {
+      console.error('[POST /api/report/unlock]', err);
+      return res.status(502).json({
+        code: 'STRIPE_NETWORK_ERROR',
+        error: LEGAL_TEXTS.paymentFailedError,
+      });
+    }
+  };
+
+  app.post('/api/report/unlock', handleCreateCheckoutSession);
+  app.post('/api/checkout/create-session', handleCreateCheckoutSession);
 
   app.post('/api/followup/save', (req, res) => {
     const ip = getClientIp(req);

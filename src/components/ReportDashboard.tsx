@@ -41,11 +41,18 @@ export interface UnlockState {
   confirmation: DurableOrderConfirmation | null;
 }
 
+export interface PaymentNotice {
+  type: 'verifying' | 'success' | 'cancelled' | 'error';
+  text: string;
+}
+
 interface ReportDashboardProps {
   report: SolarisFullReport;
   unlockState: UnlockState;
   hasRetentionDiscount: boolean;
-  onUnlockSuccess: (next: UnlockState) => void;
+  paymentNotice?: PaymentNotice | null;
+  onDismissPaymentNotice?: () => void;
+  onUnlockSuccess: (next: UnlockState, updatedReport?: SolarisFullReport) => void;
   onActivateRetentionDiscount: () => void;
   onSaveFollowUpEmail: (
     email: string,
@@ -66,6 +73,8 @@ export function ReportDashboard({
   report,
   unlockState,
   hasRetentionDiscount,
+  paymentNotice,
+  onDismissPaymentNotice,
   onUnlockSuccess,
   onActivateRetentionDiscount,
   onSaveFollowUpEmail,
@@ -98,6 +107,15 @@ export function ReportDashboard({
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [copiedConfirmation, setCopiedConfirmation] = useState(false);
+  const [pendingStripeCheckout, setPendingStripeCheckout] = useState<{
+    checkoutUrl: string;
+    stripeSessionId: string;
+    orderId: string;
+    amountPln: string;
+    stripeMode?: string;
+  } | null>(null);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [pendingStatusMsg, setPendingStatusMsg] = useState<string | null>(null);
 
   // Interactive monthly timeline focus
   const peakMonthIdx = useMemo(() => {
@@ -187,6 +205,99 @@ export function ReportDashboard({
     setSelectedModules(availableModules.map((m) => m.id));
   };
 
+  const verifyPendingStripePayment = async (stripeSessionId: string, silent = false) => {
+    if (!silent) {
+      setCheckingPayment(true);
+      setPendingStatusMsg(null);
+    }
+    try {
+      const res = await fetch(
+        `/api/checkout/verify?sessionId=${encodeURIComponent(report.sessionId)}&stripe_session_id=${encodeURIComponent(stripeSessionId)}`,
+      );
+      const json = (await res.json()) as {
+        ok?: boolean;
+        verified?: boolean;
+        unlockState?: UnlockState;
+        report?: SolarisFullReport | null;
+        error?: string;
+      };
+      if (res.ok && json.verified && json.unlockState) {
+        onUnlockSuccess(json.unlockState, json.report ?? undefined);
+        setPendingStripeCheckout(null);
+        setPendingStatusMsg(null);
+        setTermsAndAgeAccepted(false);
+        setWaiverAccepted(false);
+        setSecondPersonConsentAccepted(false);
+        setMarketingConsent(false);
+        setUseDownsellOffer(false);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return true;
+      }
+      if (!silent) {
+        setPendingStatusMsg(
+          json.error ||
+            'Płatność nie została jeszcze sfinalizowana w Stripe. Dokończ ją w otwartej karcie i kliknij ponownie.',
+        );
+      }
+      return false;
+    } catch {
+      if (!silent) {
+        setPendingStatusMsg('Nie udało się sprawdzić statusu płatności. Spróbuj ponownie za chwilę.');
+      }
+      return false;
+    } finally {
+      if (!silent) setCheckingPayment(false);
+    }
+  };
+
+  // Auto-verify when returning from Stripe tab in iframe preview mode
+  useEffect(() => {
+    if (!pendingStripeCheckout) return;
+    const handleFocus = () => {
+      void verifyPendingStripePayment(pendingStripeCheckout.stripeSessionId, true);
+    };
+    window.addEventListener('focus', handleFocus);
+    const interval = window.setInterval(() => {
+      void verifyPendingStripePayment(pendingStripeCheckout.stripeSessionId, true);
+    }, 5000);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStripeCheckout]);
+
+  const launchStripeCheckout = (payload: {
+    checkoutUrl: string;
+    stripeSessionId: string;
+    orderId: string;
+    amountPln: string;
+    stripeMode?: string;
+  }) => {
+    // Defense-in-depth: only allow Stripe's official hosted checkout origin
+    if (!payload.checkoutUrl.startsWith('https://checkout.stripe.com/')) {
+      setCheckoutError('Otrzymano nieprawidłowy adres przekierowania płatności.');
+      return;
+    }
+
+    setPendingStripeCheckout(payload);
+    setPendingStatusMsg(null);
+
+    // Top-level window redirects directly to Stripe Checkout; embedded preview iframes show a new-tab launch button (Stripe blocks iframe embedding)
+    let isEmbeddedIframe = false;
+    try {
+      isEmbeddedIframe = window.self !== window.top;
+    } catch {
+      isEmbeddedIframe = true;
+    }
+
+    if (!isEmbeddedIframe) {
+      window.location.assign(payload.checkoutUrl);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const handleCheckout = async () => {
     if (selectedModules.length === 0) {
       setCheckoutError('Zaznacz co najmniej jeden moduł, aby przejść do płatności.');
@@ -233,39 +344,27 @@ export function ReportDashboard({
       });
       const json = (await response.json()) as {
         ok?: boolean;
-        paid?: boolean;
-        error?: string;
+        requiresRedirect?: boolean;
+        checkoutUrl?: string;
+        stripeSessionId?: string;
+        stripeMode?: string;
         orderId?: string;
-        unlockedModules?: ReportModuleId[];
-        calendarUnlocked?: boolean;
-        pdfUnlocked?: boolean;
-        confirmation?: DurableOrderConfirmation | null;
+        amountPln?: string;
+        error?: string;
       };
 
-      if (!response.ok || !json.ok) {
+      if (!response.ok || !json.ok || !json.checkoutUrl || !json.stripeSessionId) {
         setCheckoutError(json.error || LEGAL_TEXTS.paymentFailedError);
         return;
       }
 
-      const merged = Array.from(
-        new Set([...unlockState.unlockedModules, ...(json.unlockedModules ?? selectedModules)]),
-      );
-
-      onUnlockSuccess({
-        paid: true,
-        unlockedModules: merged,
-        calendarUnlocked: unlockState.calendarUnlocked || Boolean(json.calendarUnlocked),
-        pdfUnlocked: unlockState.pdfUnlocked || Boolean(json.pdfUnlocked),
-        orderId: json.orderId ?? unlockState.orderId,
-        firstPurchaseAtMs: unlockState.firstPurchaseAtMs ?? Date.now(),
-        confirmation: json.confirmation ?? unlockState.confirmation,
+      launchStripeCheckout({
+        checkoutUrl: json.checkoutUrl,
+        stripeSessionId: json.stripeSessionId,
+        orderId: json.orderId || '',
+        amountPln: json.amountPln || pricing.formattedFinalPln,
+        stripeMode: json.stripeMode,
       });
-      setTermsAndAgeAccepted(false);
-      setWaiverAccepted(false);
-      setSecondPersonConsentAccepted(false);
-      setMarketingConsent(false);
-      setUseDownsellOffer(false);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch {
       setCheckoutError(LEGAL_TEXTS.paymentFailedError);
     } finally {
@@ -281,7 +380,6 @@ export function ReportDashboard({
     setUpsellError(null);
     setIsPaying(true);
     try {
-      const remainingIds = lockedModules.map((m) => m.id);
       const response = await fetch('/api/report/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -291,6 +389,7 @@ export function ReportDashboard({
           mode: report.mode,
           selectedModules: availableModules.map((m) => m.id),
           includeCalendarBump: true,
+          isUpsell: true,
           termsAndAgeAccepted: true,
           withdrawalWaiverAccepted: true,
           secondPersonConsentAccepted: report.mode === 'pair' ? upsellSecondPerson : false,
@@ -298,23 +397,25 @@ export function ReportDashboard({
       });
       const json = (await response.json()) as {
         ok?: boolean;
-        error?: string;
+        requiresRedirect?: boolean;
+        checkoutUrl?: string;
+        stripeSessionId?: string;
+        stripeMode?: string;
         orderId?: string;
-        confirmation?: DurableOrderConfirmation | null;
+        amountPln?: string;
+        error?: string;
       };
-      if (!response.ok || !json.ok) {
+      if (!response.ok || !json.ok || !json.checkoutUrl || !json.stripeSessionId) {
         setUpsellError(json.error || LEGAL_TEXTS.paymentFailedError);
         return;
       }
 
-      onUnlockSuccess({
-        paid: true,
-        unlockedModules: Array.from(new Set([...unlockState.unlockedModules, ...remainingIds])),
-        calendarUnlocked: true,
-        pdfUnlocked: true,
-        orderId: json.orderId ?? unlockState.orderId,
-        firstPurchaseAtMs: unlockState.firstPurchaseAtMs,
-        confirmation: json.confirmation ?? unlockState.confirmation,
+      launchStripeCheckout({
+        checkoutUrl: json.checkoutUrl,
+        stripeSessionId: json.stripeSessionId,
+        orderId: json.orderId || '',
+        amountPln: json.amountPln || formatPlnFromGrosze(POST_PURCHASE_UPSELL_GROSZE),
+        stripeMode: json.stripeMode,
       });
     } catch {
       setUpsellError(LEGAL_TEXTS.paymentFailedError);
@@ -371,6 +472,79 @@ export function ReportDashboard({
 
   return (
     <main className="mx-auto w-full max-w-[1160px] px-4 pb-24 pt-6 sm:px-6 sm:pt-9">
+      {/* Stripe Return Status Notice (verified / cancelled / verifying) */}
+      {paymentNotice && (
+        <div
+          role={paymentNotice.type === 'error' ? 'alert' : 'status'}
+          className={`no-print mb-5 flex items-start justify-between gap-3 rounded-2xl border px-4 py-3.5 text-xs leading-relaxed ${
+            paymentNotice.type === 'success'
+              ? 'border-[#4ADE80]/40 bg-[#111D16] text-[#DCFCE7]'
+              : paymentNotice.type === 'error'
+                ? 'border-[#FF5C35]/45 bg-[#201311] text-[#FFD7CC]'
+                : 'border-white/[0.14] bg-[#16161B] text-[#E4E4EA]'
+          }`}
+        >
+          <span>{paymentNotice.text}</span>
+          {onDismissPaymentNotice && (
+            <button
+              type="button"
+              onClick={onDismissPaymentNotice}
+              aria-label="Zamknij komunikat"
+              className="shrink-0 rounded-full p-1 text-white/60 hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Pending Stripe Checkout Launch Card (used automatically in iframe previews or if redirect is blocked) */}
+      {pendingStripeCheckout && (
+        <div
+          role="region"
+          aria-label="Przejdź do płatności Stripe"
+          className="no-print mb-6 rounded-[24px] border border-[#FF5C35]/50 bg-[#1A1312] p-5 text-sm text-white shadow-xl"
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="font-mono text-[11px] uppercase tracking-[0.04em] text-[#FF8C70]">
+                Sesja Stripe gotowa · Zamówienie {pendingStripeCheckout.orderId}
+              </p>
+              <h2 className="font-display text-base font-semibold text-white">
+                Dokończ bezpieczną płatność {pendingStripeCheckout.amountPln} w Stripe
+              </h2>
+              <p className="text-xs leading-relaxed text-[#C4C4CE]">
+                Po opłaceniu zamówienia w oknie Stripe wróć tutaj — raport odblokuje się automatycznie po weryfikacji po stronie serwera.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <a
+                href={pendingStripeCheckout.checkoutUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[46px] items-center justify-center gap-2 rounded-full bg-[#FF5C35] px-5 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#FF6E4B]"
+              >
+                <span>Otwórz płatność Stripe ({pendingStripeCheckout.amountPln})</span>
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </a>
+              <button
+                type="button"
+                disabled={checkingPayment}
+                onClick={() => void verifyPendingStripePayment(pendingStripeCheckout.stripeSessionId)}
+                className="inline-flex min-h-[46px] items-center justify-center rounded-full border border-white/20 bg-white/[0.06] px-4 py-2.5 text-xs font-medium text-white hover:bg-white/[0.12] disabled:opacity-50"
+              >
+                {checkingPayment ? 'Sprawdzam...' : 'Sprawdź status płatności'}
+              </button>
+            </div>
+          </div>
+
+          {pendingStatusMsg && (
+            <p className="mt-3 text-xs text-[#FFD7CC]">{pendingStatusMsg}</p>
+          )}
+        </div>
+      )}
+
       {/* DURABLE POST-PURCHASE ORDER CONFIRMATION (Trwały nośnik — teksty-do-formularzy.md sekcja 3) */}
       {hasAnyPurchase && unlockState.confirmation && (
         <section
