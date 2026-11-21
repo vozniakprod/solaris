@@ -14,6 +14,12 @@ import type {
   SolarisFullReport,
 } from './utils/ephemerisEngine';
 import type { FunnelMode, RelationType } from './utils/solarisPricing';
+import {
+  parsePlnAmountToNumber,
+  trackTikTokCompletePayment,
+  trackTikTokSubmitForm,
+  trackTikTokViewContent,
+} from './utils/tiktokPixel';
 
 const STORAGE_KEY = 'solaris_2027_session_v2';
 
@@ -211,6 +217,14 @@ export default function App() {
                   // keep locally stored deterministic report if enrichment/email times out
                 }
               }
+              trackTikTokCompletePayment({
+                eventId: stripeSessionId,
+                contentId: serverUnlock.orderId || targetSessionId,
+                contentName: serverUnlock.confirmation?.variantLabel
+                  ? `Solaris 2027 — Raport (${serverUnlock.confirmation.variantLabel})`
+                  : 'Solaris 2027 — Raport',
+                value: parsePlnAmountToNumber(serverUnlock.confirmation?.priceGrossPln),
+              });
               setPaymentNotice({
                 type: 'success',
                 text: serverUnlock.emailDeliveredTo
@@ -360,6 +374,14 @@ export default function App() {
       } catch {
         // ignore
       }
+      trackTikTokViewContent({
+        contentId: json.report.sessionId,
+        contentName:
+          json.report.mode === 'pair'
+            ? 'Solaris 2027 — Raport Dla Dwojga'
+            : 'Solaris 2027 — Raport Solo',
+        value: json.report.mode === 'pair' ? 49.99 : 29.99,
+      });
       setView('report');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -398,6 +420,7 @@ export default function App() {
           message: json.error || 'Wpisz poprawny adres e-mail i zaznacz zgodę.',
         };
       }
+      trackTikTokSubmitForm();
       return {
         ok: true,
         message:

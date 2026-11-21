@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { LegalDocId } from '../data/legalDocuments';
+import { syncTikTokConsent } from '../utils/tiktokPixel';
 
 export const COOKIE_CONSENT_STORAGE_KEY = 'cookie_consent';
 
@@ -72,8 +73,15 @@ export function CookieBanner({
     }
   }, [forceOpenSettings, consent]);
 
+  useEffect(() => {
+    if (consent) {
+      syncTikTokConsent(consent.marketing);
+    }
+  }, [consent]);
+
   const handleAcceptAll = () => {
     const saved = saveCookieConsent({ analytics: true, marketing: true });
+    syncTikTokConsent(true);
     setConsent(saved);
     setSettingsOpen(false);
     onCloseSettings();
@@ -81,6 +89,7 @@ export function CookieBanner({
 
   const handleEssentialOnly = () => {
     const saved = saveCookieConsent({ analytics: false, marketing: false });
+    syncTikTokConsent(false);
     setConsent(saved);
     setSettingsOpen(false);
     onCloseSettings();
@@ -91,6 +100,7 @@ export function CookieBanner({
       analytics: analyticsDraft,
       marketing: marketingDraft,
     });
+    syncTikTokConsent(saved.marketing);
     setConsent(saved);
     setSettingsOpen(false);
     onCloseSettings();

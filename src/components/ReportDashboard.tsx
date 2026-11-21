@@ -37,6 +37,11 @@ import {
   PostPurchaseUpsellCard,
   ReportCheckoutSection,
 } from './ReportCheckoutSection';
+import {
+  parsePlnAmountToNumber,
+  trackTikTokCompletePayment,
+  trackTikTokInitiateCheckout,
+} from '../utils/tiktokPixel';
 
 export interface UnlockState {
   paid: boolean;
@@ -301,6 +306,14 @@ export function ReportDashboard({
             // keep verified unlock state even if email delivery times out
           }
         }
+        trackTikTokCompletePayment({
+          eventId: stripeSessionId,
+          contentId: finalUnlock.orderId || report.sessionId,
+          contentName: finalUnlock.confirmation?.variantLabel
+            ? `Solaris 2027 — Raport (${finalUnlock.confirmation.variantLabel})`
+            : 'Solaris 2027 — Raport',
+          value: parsePlnAmountToNumber(finalUnlock.confirmation?.priceGrossPln),
+        });
         onUnlockSuccess(finalUnlock, finalReport);
         setPendingStripeCheckout(null);
         setPendingStatusMsg(null);
@@ -358,6 +371,15 @@ export function ReportDashboard({
       setCheckoutError('Otrzymano nieprawidłowy adres przekierowania płatności.');
       return;
     }
+
+    trackTikTokInitiateCheckout({
+      contentId: payload.orderId || report.sessionId,
+      contentName:
+        report.mode === 'pair'
+          ? 'Solaris 2027 — Pakiet Dla Dwojga'
+          : 'Solaris 2027 — Raport Solo',
+      value: parsePlnAmountToNumber(payload.amountPln),
+    });
 
     setPendingStripeCheckout(payload);
     setPendingStatusMsg(null);
