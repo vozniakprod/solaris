@@ -1,6 +1,11 @@
 import { useState } from 'react';
-import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, Star, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { FunnelMode } from '../utils/solarisPricing';
+import {
+  LEGAL_TEXTS,
+  SELLER_LEGAL_CONFIG,
+  type LegalDocId,
+} from '../data/legalDocuments';
 
 const PORTRAIT_IMG = '/src/assets/images/editorial_warsaw_portrait_1795221168412.jpg';
 const ARTICLE_FINANCE_IMG = '/src/assets/images/article_finance_2027_1795221167161.jpg';
@@ -9,8 +14,12 @@ const ARTICLE_DECISIONS_IMG = '/src/assets/images/article_decisions_2027_1795221
 
 interface LandingSectionsProps {
   onStartFunnel: (mode: FunnelMode) => void;
-  onOpenLegal: (doc: 'regulamin' | 'polityka') => void;
-  onSaveNewsletterEmail: (email: string) => Promise<{ ok: boolean; message: string }>;
+  onOpenLegal: (doc: LegalDocId) => void;
+  onOpenCookieSettings: () => void;
+  onSaveNewsletterEmail: (
+    email: string,
+    marketingConsent: boolean,
+  ) => Promise<{ ok: boolean; message: string }>;
 }
 
 interface EditorialArticle {
@@ -32,10 +41,10 @@ const EDITORIAL_ARTICLES: readonly EditorialArticle[] = [
     date: 'Analiza 2027',
     title: 'Dlaczego w połowie 2027 roku część osób straci poduszkę finansową przez jedną pochopną decyzję?',
     excerpt:
-      'Presja zmiany pracy lub kosztowny kredyt pod wpływem zmęczenia to najczęstszy błąd przed przełomowym kwartałem. Sprawdź, jak rozpoznać swoje okno ryzyka.',
+      'Presja zmiany pracy lub kosztowny kredyt pod wpływem zmęczenia to częsty błąd przed przełomowym kwartałem. Sprawdź, jak wyznaczyć swoje okna ostrożności.',
     body: [
-      'Większość złych decyzji finansowych nie wynika z braku kompetencji, tylko z fatalnego timingu. W 2027 roku układy Saturna i Jowisza wyraźnie rozdzielają okresy budowania marży od tygodni, w których rośnie presja na szybkie, nieprzemyślane ruchy.',
-      'W raporcie Solaris 2027 nie dostajesz ogólników o „obfitości”. Zamiast tego widzisz konkretne przedziały dat, kiedy warto renegocjować stawki, oraz 2–3 tygodnie w roku, kiedy każdą umowę trzeba odłożyć na bok i sprawdzić dwa razy.',
+      'Wiele niekorzystnych decyzji finansowych wynika nie z braku kompetencji, lecz ze złego timingu i działania pod wpływem zmęczenia. W raporcie Solaris 2027 rozdzielamy miesiące o wyższym potencjale inicjatywy od okresów, w których warto zachować większą ostrożność przy umowach i wydatkach stałych.',
+      'Zamiast ogólnych haseł dostajesz uporządkowane okresy na cały rok, konkretne pytania kontrolne oraz kalendarz, który pomaga lepiej zaplanować ważne rozmowy.',
     ],
     image: ARTICLE_FINANCE_IMG,
     imageAlt: 'Czarny laptop, notatnik i espresso na jasnym kamiennym biurku w porannym świetle',
@@ -47,10 +56,10 @@ const EDITORIAL_ARTICLES: readonly EditorialArticle[] = [
     date: 'Relacje 2027',
     title: 'Dlaczego w 2027 roku w niektórych relacjach pojawi się kryzys, a inne wejdą na nowy poziom?',
     excerpt:
-      'Konflikty rzadko wybuchają przez brak uczuć. Zwykle chodzi o rozjazd tempa decyzji, pieniędzy i granic w jednym konkretnym miesiącu roku.',
+      'Konflikty rzadko biorą się z braku zaangażowania. Częściej chodzi o rozjazd tempa decyzji, budżetu i granic w jednym konkretnym okresie roku.',
     body: [
-      'Gdy dwie osoby wchodzą w różne fazy swojego Solariusza — jedna przyspiesza zawodowo, a druga ma miesiąc przeciążenia — zwykła rozmowa o planach zamienia się w spór o brak wsparcia.',
-      'Analiza dla dwojga w Solaris 2027 zestawia dokładne efemerydy obu osób i pokazuje indeks zgodności (68%–94%), miesiące największej synergii oraz przedział dat, w którym lepiej nie stawiać ultimatum.',
+      'Gdy dwie osoby wchodzą w różne fazy roku — jedna przyspiesza zawodowo, a druga ma okres przeciążenia — zwykła rozmowa o planach potrafi zamienić się w niepotrzebne tarcie.',
+      'Wariant „Dla dwojga” w Solaris 2027 zestawia dane obu osób i pokazuje przykładowy indeks zgodności (68%–94%), okresy wspólnego rytmu oraz miesiące, w których warto rozmawiać szczególnie spokojnie i konkretnie.',
     ],
     image: ARTICLE_RELATIONS_IMG,
     imageAlt: 'Para rozmawiająca przy stoliku kawiarnianym w świetle dziennym',
@@ -60,12 +69,12 @@ const EDITORIAL_ARTICLES: readonly EditorialArticle[] = [
     id: 'przeprowadzka-zmiana',
     author: 'Redakcja Solaris',
     date: 'Decyzje 2027',
-    title: 'Zmiana branży albo przeprowadzka w 2027: 3 sygnały z matrycy, że to dobry moment',
+    title: 'Zmiana branży albo przeprowadzka w 2027: 3 sygnały z raportu, na które warto zwrócić uwagę',
     excerpt:
-      'Odkładanie decyzji miesiącami wypala bardziej niż sam ruch. Sprawdź, które kwartały 2027 sprzyjają logistyce, a które blokują nowe starty.',
+      'Odkładanie decyzji miesiącami męczy bardziej niż samo działanie. Sprawdź, które kwartały 2027 sprzyjają logistyce, a które lepiej poświęcić na przygotowania.',
     body: [
-      'W matrycy solarnej wyraźnie widać różnicę między kwartałem porządkowania a oknem ekspansji. Ruch wykonany w fazie zamknięcia kończy się poprawkami i dodatkowymi kosztami.',
-      'Z raportem dostajesz gotowy plik .ics do Apple i Google Calendar z zaznaczonymi złotymi i ryzykownymi datami — widzisz je dokładnie tam, gdzie planujesz swój tydzień.',
+      'W przeglądzie roku wyraźnie widać różnicę między kwartałem porządkowania a okresem otwierania nowych projektów. Dobre przygotowanie formalności przed okresem wzmożonego tempa oszczędza czas i nerwy.',
+      'Do pełnego pakietu dołączamy plik .ics do Apple i Google Calendar z 12 oknami dat — widzisz je bezpośrednio w swoim codziennym kalendarzu.',
     ],
     image: ARTICLE_DECISIONS_IMG,
     imageAlt: 'Osoba z telefonem z widokiem kalendarza przy oknie nad miastem o zmierzchu',
@@ -73,42 +82,52 @@ const EDITORIAL_ARTICLES: readonly EditorialArticle[] = [
   },
 ];
 
-const REVIEWS = [
+// Honest sample excerpts (replaces fabricated reviews per P0.4)
+const SAMPLE_REPORT_EXCERPTS = [
   {
-    name: 'Karolina Nowak',
-    role: 'Product Manager · Warszawa',
-    quote:
-      'Zero ezoterycznej waty. Wskazało dokładnie trudny październik w relacji i najlepszy moment na rozmowę o podwyżce — pierwszy raz użyłam pliku .ics w kalendarzu Google.',
+    section: 'Moduł 01 · Finanse i Kariera',
+    badge: 'Przykład — nie jest opinią klienta',
+    title: 'Okno rozmów o stawkach vs tygodnie ostrożności',
+    excerpt:
+      '„Możliwy okres większej sprawczości przypada między 11 a 27 maja 2027. Z kolei w drugim tygodniu października warto zachować ostrożność przy podpisywaniu zobowiązań długoterminowych i dać sobie 48 godzin na chłodną weryfikację warunków.”',
+    meta: 'Dane poglądowe · Format modułu PDF / web',
     featured: false,
   },
   {
-    name: 'Michał & Marta',
-    role: 'Wspólny biznes · Kraków',
-    quote:
-      'Zrobiliśmy matrycę dla dwojga przed podpisaniem umowy najmu lokalu. Opis naszego tarcia w komunikacji pod presją był celny w punkt — zaoszczędziło nam to masę nerwów.',
+    section: 'Moduł 05 · Zgodność dla dwojga',
+    badge: 'Przykład — nie jest opinią klienta',
+    title: 'Wspólny rytm decyzji i punkt tarcia w komunikacji',
+    excerpt:
+      '„W trybie dla dwojga raport wskazuje okres, w którym łatwiej domknąć wspólny budżet lub plany wyjazdowe, oraz tydzień podwyższonego tarcia, gdy różne tempo reakcji pod presją wymaga prostych, spisanych ustaleń zamiast domysłów.”',
+    meta: 'Dane poglądowe · Para / Przyjaciele / Biznes',
     featured: true,
   },
   {
-    name: 'Tomasz Zieliński',
-    role: 'Architekt · Gdańsk',
-    quote:
-      'Kupiłem na start tylko moduł Finanse za 14,99 zł, żeby sprawdzić, czy to nie kolejny generator z sieci. Po 5 minutach odblokowałem cały pakiet z PDF-em na 2027.',
+    section: 'Dodatek · Kalendarz .ics (12 okien)',
+    badge: 'Przykład — nie jest opinią klienta',
+    title: 'Krótka checklista przypięta do konkretnego tygodnia',
+    excerpt:
+      '„Każde z 12 okien w pliku .ics zawiera przedział dat oraz 2–3 zdania podsumowania do refleksji: na czym warto się skupić, a z jakimi decyzjami lepiej poczekać. Import do Google Calendar i Apple Calendar zajmuje 10 sekund.”',
+    meta: 'Dane poglądowe · Eksport RFC 5545 (.ics)',
     featured: false,
   },
-];
+] as const;
 
 export function LandingSections({
   onStartFunnel,
   onOpenLegal,
+  onOpenCookieSettings,
   onSaveNewsletterEmail,
 }: LandingSectionsProps) {
   const [activeArticle, setActiveArticle] = useState<EditorialArticle | null>(null);
   const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [newsletterConsent, setNewsletterConsent] = useState(false);
   const [newsletterStatus, setNewsletterStatus] = useState<{
     type: 'idle' | 'ok' | 'error';
     text: string;
   }>({ type: 'idle', text: '' });
   const [articleOffset, setArticleOffset] = useState(0);
+  const [portraitBroken, setPortraitBroken] = useState(false);
 
   const orderedArticles = [
     EDITORIAL_ARTICLES[articleOffset % EDITORIAL_ARTICLES.length],
@@ -118,9 +137,19 @@ export function LandingSections({
 
   const handleNewsletterSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const res = await onSaveNewsletterEmail(newsletterEmail);
+    if (!newsletterConsent) {
+      setNewsletterStatus({
+        type: 'error',
+        text: 'Zaznacz dobrowolną zgodę na otrzymywanie wiadomości e-mail.',
+      });
+      return;
+    }
+    const res = await onSaveNewsletterEmail(newsletterEmail, newsletterConsent);
     setNewsletterStatus({ type: res.ok ? 'ok' : 'error', text: res.message });
-    if (res.ok) setNewsletterEmail('');
+    if (res.ok) {
+      setNewsletterEmail('');
+      setNewsletterConsent(false);
+    }
   };
 
   return (
@@ -130,33 +159,38 @@ export function LandingSections({
         <div className="rounded-[28px] bg-[#D6D1C4] px-4 py-10 text-[#111114] sm:rounded-[34px] sm:px-8 sm:py-14 lg:px-12 lg:py-16">
           <div className="mx-auto max-w-2xl text-center">
             <h2 className="font-display text-[clamp(1.75rem,3.6vw,2.9rem)] font-medium leading-[1.12] tracking-[-0.025em] text-[#111114]">
-              Konkretny Plan Na 2027
+              Konkretny Przegląd 2027
               <br />
               Zamiast Ogólnych Horoskopów
             </h2>
             <p className="mx-auto mt-3.5 max-w-lg text-sm leading-relaxed text-[#4A4842] sm:text-[15px]">
-              Łączymy dokładne obliczenia efemeryd Solariusza z krótkim profilem
-              decyzyjnym. Wybierasz tylko te sfery, które naprawdę chcesz poukładać.
+              Łączymy obliczenia Solariusza na podstawie Twoich danych z krótkim quizem
+              decyzyjnym. Wybierasz tylko te obszary, które chcesz sprawdzić.
             </p>
           </div>
 
-          {/* 3 High-Contrast Dark Cards matching Figma exactly */}
+          {/* 3 High-Contrast Dark Cards matching Figma exactly (all examples clearly labeled) */}
           <div className="mt-8 grid grid-cols-1 gap-4 lg:mt-11 lg:grid-cols-3">
-            {/* Left Dark Card (Figma: Top Clients) */}
+            {/* Left Dark Card (Figma: Top Clients -> Labeled Sample Profiles) */}
             <article className="flex flex-col justify-between rounded-[22px] bg-[#111114] p-5 text-white sm:p-6">
               <div>
-                <h3 className="font-display text-base font-semibold text-white">
-                  Profile i Zgodność
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-display text-base font-semibold text-white">
+                    Warianty raportu
+                  </h3>
+                  <span className="font-mono text-[10px] uppercase text-[#9A9AA3]">
+                    Przykład
+                  </span>
+                </div>
                 <p className="mt-1.5 text-xs leading-relaxed text-[#8E8E98]">
-                  Sprawdź sam siebie albo zestaw swoją datę z partnerem, przyjacielem czy wspólnikiem.
+                  Sprawdź profil dla siebie albo zestaw daty urodzenia dwóch osób — w relacji, przyjaźni lub współpracy.
                 </p>
 
                 <div className="mt-5 space-y-3">
                   {[
-                    { initials: 'MK', name: 'Maja Kowalska', sub: 'Warszawa · Finanse Q2', tag: 'Solo' },
-                    { initials: 'KO', name: 'Kamil & Ola', sub: 'Kraków · Zgodność 87%', tag: 'Para' },
-                    { initials: 'PW', name: 'Piotr Wiśniewski', sub: 'Gdańsk · Zmiana branży', tag: 'Biznes' },
+                    { code: '01', name: 'Profil Solo (przykład)', sub: 'Finanse i Kariera · Dane poglądowe', tag: 'Solo' },
+                    { code: '02', name: 'Profil Para (przykład)', sub: 'Indeks 87% · Dane poglądowe', tag: 'Para' },
+                    { code: '03', name: 'Profil Biznes (przykład)', sub: 'Wspólne decyzje · Dane poglądowe', tag: 'Biznes' },
                   ].map((row) => (
                     <div
                       key={row.name}
@@ -164,7 +198,7 @@ export function LandingSections({
                     >
                       <div className="flex min-w-0 items-center gap-2.5">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#242429] font-mono text-[11px] font-medium text-[#E4E4EA]">
-                          {row.initials}
+                          {row.code}
                         </span>
                         <div className="min-w-0">
                           <p className="truncate text-xs font-semibold text-white">{row.name}</p>
@@ -180,43 +214,77 @@ export function LandingSections({
               </div>
             </article>
 
-            {/* Center Dark Portrait Card (Figma: Enhance with feedback insights) */}
+            {/* Center Dark Visual Card (Fixed fallback, explicit dimensions, zero fake quote!) */}
             <article className="flex flex-col justify-between overflow-hidden rounded-[22px] bg-[#111114] p-5 text-white sm:p-6">
               <div>
-                <h3 className="font-display text-base font-semibold text-white">
-                  Bez lania wody, prosto w daty
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-display text-base font-semibold text-white">
+                    Bez lania wody, prosto w daty
+                  </h3>
+                  <span className="font-mono text-[10px] uppercase text-[#9A9AA3]">
+                    Podgląd
+                  </span>
+                </div>
                 <p className="mt-1.5 text-xs leading-relaxed text-[#8E8E98]">
-                  Zamiast pustych haseł dostajesz 12-miesięczną oś energii i ryzyka oraz listę konkretnych działań.
+                  Zamiast pustych haseł dostajesz 12-miesięczną oś energii i ostrożności oraz listę konkretnych pytań do przemyślenia.
                 </p>
               </div>
 
-              <div className="relative mt-5 overflow-hidden rounded-2xl bg-[#1D1D22]">
-                <img
-                  src={PORTRAIT_IMG}
-                  alt="Redakcyjny portret kobiety przy oknie w warszawskim mieszkaniu"
-                  referrerPolicy="no-referrer"
-                  className="h-[196px] w-full object-cover object-top"
-                />
+              <div className="relative mt-5 h-[196px] overflow-hidden rounded-2xl bg-gradient-to-br from-[#23232A] via-[#1A1A20] to-[#121216]">
+                {!portraitBroken ? (
+                  <img
+                    src={PORTRAIT_IMG}
+                    width={640}
+                    height={392}
+                    loading="lazy"
+                    decoding="async"
+                    onError={() => setPortraitBroken(true)}
+                    alt="Ilustracja redakcyjna raportu Solaris 2027"
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-cover object-top"
+                  />
+                ) : (
+                  <div className="flex h-full w-full flex-col justify-between p-4">
+                    <span className="font-mono text-[10px] uppercase text-[#D8B4FE]">
+                      Solariusz 2027 · Oś 12 miesięcy
+                    </span>
+                    <div className="grid grid-cols-6 items-end gap-1.5 h-20">
+                      {[52, 68, 86, 74, 48, 80].map((v, i) => (
+                        <div
+                          key={i}
+                          style={{ height: `${v}%` }}
+                          className="rounded-t-md bg-white/25"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#111114]/90 via-transparent to-transparent"
+                  className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#111114]/92 via-[#111114]/25 to-transparent"
                 />
                 <div className="absolute inset-x-3 bottom-3 text-center">
-                  <p className="text-xs font-semibold text-white">Zofia, 31 · Warszawa</p>
+                  <p className="text-xs font-semibold text-white">
+                    Przykładowy układ raportu 2027
+                  </p>
                   <p className="font-mono text-[10px] text-[#C4C4CE]">
-                    „Przesunęłam negocjacje o 3 tygodnie — trafiłam w punkt.”
+                    Dane poglądowe · Wersja mobilna, A4 PDF i plik .ics
                   </p>
                 </div>
               </div>
             </article>
 
-            {/* Right Dark Hatched Progress Card (Figma: Task Progress) */}
+            {/* Right Dark Hatched Progress Card (Figma: Task Progress — clearly marked Przykład) */}
             <article className="flex flex-col justify-between rounded-[22px] bg-[#111114] p-5 text-white sm:p-6">
               <div>
-                <h3 className="font-display text-base font-semibold text-white">
-                  Modułowy raport A4 + .ics
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-display text-base font-semibold text-white">
+                    Modułowy raport A4 + .ics
+                  </h3>
+                  <span className="font-mono text-[10px] uppercase text-[#9A9AA3]">
+                    Przykład
+                  </span>
+                </div>
                 <p className="mt-1.5 text-xs leading-relaxed text-[#8E8E98]">
                   Odblokowujesz jedną sferę od 14,99 zł albo cały pakiet 2027 z kalendarzem do telefonu gratis.
                 </p>
@@ -239,70 +307,84 @@ export function LandingSections({
                   </div>
                 ))}
               </div>
+              <p className="mt-3 text-center font-mono text-[10px] text-[#7D7D87]">
+                Dane poglądowe · skala orientacyjna 1–10
+              </p>
             </article>
           </div>
         </div>
       </section>
 
-      {/* SECTION 3: Dark Testimonials + Method Strip (Exact Figma IMG_1430 top) */}
-      <section id="opinie" className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
-        <h2 className="font-display mx-auto max-w-xl text-center text-[clamp(1.75rem,3.6vw,2.85rem)] font-medium leading-[1.12] tracking-[-0.025em]">
-          <span className="text-[#8E8E95]">Czytelnicy Cenią </span>
-          <span className="text-white">Konkret</span>
-          <br />
-          <span className="text-[#8E8E95]">Zamiast </span>
-          <span className="text-white">Pustych Obietnic</span>
-        </h2>
+      {/* SECTION 3: Honest Sample Report Excerpts (Replaces ALL fake reviews per P0.4!) */}
+      <section id="przyklady" className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
+        <div className="mx-auto max-w-2xl text-center">
+          <h2 className="font-display text-[clamp(1.75rem,3.6vw,2.85rem)] font-medium leading-[1.12] tracking-[-0.025em]">
+            <span className="text-[#8E8E95]">Przykładowy Fragment </span>
+            <span className="text-white">Raportu</span>
+            <br />
+            <span className="text-[#8E8E95]">Zanim </span>
+            <span className="text-white">Zdecydujesz</span>
+          </h2>
+          <p className="mt-3 text-xs text-[#9A9AA3] sm:text-sm">
+            Poniższe karty pokazują styl i strukturę treści w Solaris 2027. Każdy fragment jest materiałem poglądowym.
+          </p>
+        </div>
 
         <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3">
-          {REVIEWS.map((rev) => (
+          {SAMPLE_REPORT_EXCERPTS.map((item) => (
             <article
-              key={rev.name}
-              className={`flex flex-col justify-between rounded-[22px] border p-6 text-center transition-colors duration-150 ${
-                rev.featured
+              key={item.section}
+              className={`flex flex-col justify-between rounded-[22px] border p-6 text-left transition-colors duration-150 ${
+                item.featured
                   ? 'border-white/[0.16] bg-[#141418]'
                   : 'border-white/[0.06] bg-[#101013]'
               }`}
             >
               <div>
-                <div className="flex items-center justify-center gap-1 text-[#F59E0B]" aria-label="Ocena 5 na 5">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star key={i} className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
-                  ))}
-                </div>
-                <p className="mt-4 text-sm leading-relaxed text-[#D4D4DC]">
-                  „{rev.quote}”
+                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.04em] text-[#D8B4FE]">
+                  {item.badge}
+                </p>
+                <h3 className="font-display mt-2 text-base font-semibold text-white">
+                  {item.title}
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-[#D4D4DC]">
+                  {item.excerpt}
                 </p>
               </div>
 
               <div className="mt-6 border-t border-white/[0.06] pt-4">
-                <p className="text-xs font-semibold text-white">{rev.name}</p>
-                <p className="mt-0.5 text-[11px] text-[#7D7D87]">{rev.role}</p>
+                <p className="text-xs font-semibold text-white">{item.section}</p>
+                <p className="mt-0.5 text-[11px] text-[#7D7D87]">{item.meta}</p>
               </div>
             </article>
           ))}
         </div>
 
-        {/* Monochrome Credibility & Method Strip (Figma logo bar equivalent) */}
+        {/* Monochrome Capability & Payment Strip */}
         <div className="mt-12 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border-y border-white/[0.06] py-6 text-xs font-medium tracking-[0.04em] text-[#7A7A84] sm:gap-x-12 sm:text-sm">
           <span>SOLARIUSZ 2027</span>
-          <span>EFEMERYDY ASTRONOMICZNE</span>
-          <span>BLIK &amp; APPLE PAY</span>
+          <span>OBLICZENIA IANA TZ</span>
+          <span>STRIPE · BLIK &amp; KARTA</span>
           <span>KALENDARZ .ICS</span>
           <span>RAPORT A4 PDF</span>
         </div>
       </section>
 
-      {/* SECTION 4: Asymmetric Flanking Analytics Split (Exact Figma IMG_1430 middle — Pain -> Fact Pair Hook!) */}
+      {/* SECTION 4: Asymmetric Flanking Analytics Split (Exact Figma IMG_1430 middle — Labeled Examples!) */}
       <section id="zgodnosc" className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-16 lg:px-8">
         <div className="grid grid-cols-1 items-center gap-6 lg:grid-cols-12">
           {/* Left Floating Warm-Ivory Analytics Card */}
           <article className="rounded-[22px] bg-[#F5F3EC] p-5 text-[#111114] lg:col-span-3">
-            <h3 className="font-display text-sm font-semibold text-[#111114]">
-              Rytm decyzji 2027
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-display text-sm font-semibold text-[#111114]">
+                Rytm decyzji 2027
+              </h3>
+              <span className="font-mono text-[10px] uppercase text-[#6B6B73]">
+                Przykład
+              </span>
+            </div>
             <p className="mt-0.5 text-[11px] text-[#6B6B73]">
-              Porównanie miesięcy wzrostu i napięć
+              Dane poglądowe · rozkład miesięcy
             </p>
             <div className="mt-4 grid grid-cols-3 gap-2 font-mono text-[11px] tabular-nums">
               <div>
@@ -315,7 +397,7 @@ export function LandingSections({
               </div>
               <div>
                 <p className="font-semibold text-[#111114]">2 mies.</p>
-                <p className="text-[10px] text-[#6B6B73]">Ryzyko</p>
+                <p className="text-[10px] text-[#6B6B73]">Ostrożność</p>
               </div>
             </div>
             <div className="mt-5 flex h-24 items-end justify-between gap-2">
@@ -335,7 +417,7 @@ export function LandingSections({
             </div>
           </article>
 
-          {/* Center Pain -> Fact Hook (User's exact editorial copy!) */}
+          {/* Center Pain -> Fact Hook */}
           <div className="text-center lg:col-span-6 lg:px-6">
             <h2 className="font-display text-[clamp(1.7rem,3.4vw,2.75rem)] font-medium leading-[1.12] tracking-[-0.025em]">
               <span className="text-[#8E8E95]">Dlaczego Jedne Relacje </span>
@@ -350,8 +432,8 @@ export function LandingSections({
               Sprawdź waszą matrycę w 2 minuty.
             </p>
             <p className="mx-auto mt-2.5 max-w-md text-xs leading-relaxed text-[#8E8E98]">
-              Wystarczy, że wpiszesz daty i miejsca urodzenia obu osób. Bez wysyłania linków, bez logowania —
-              od razu widzisz wynik zgodności (68%–94%) oraz miesiąc, w którym warto rozmawiać szczególnie ostrożnie.
+              Wpisujesz tylko niezbędne dane obu osób (imię lub pseudonim, datę i miejsce urodzenia; godzina jest opcjonalna).
+              Bez wysyłania linków, bez logowania — od razu widzisz darmowy skrót.
             </p>
 
             <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -373,13 +455,13 @@ export function LandingSections({
             </div>
           </div>
 
-          {/* Right Floating Pastel Lavender Donut Card (Figma: Earnings) */}
+          {/* Right Floating Pastel Lavender Donut Card (Clearly labeled Dane poglądowe — NO fake names!) */}
           <article className="rounded-[22px] bg-[#E9D5FF] p-5 text-[#111114] lg:col-span-3">
             <h3 className="font-display text-center text-sm font-semibold text-[#111114]">
-              Zgodność 2027
+              Zgodność 2027 (Przykład)
             </h3>
             <p className="mt-0.5 text-center text-[11px] text-[#4B3F5C]">
-              Przykładowy wynik pary: Kasia &amp; Marek
+              Dane poglądowe · przykładowy profil pary
             </p>
 
             <div className="my-4 flex justify-center">
@@ -409,7 +491,7 @@ export function LandingSections({
                   <span className="font-mono text-xl font-bold tabular-nums text-[#111114]">
                     87%
                   </span>
-                  <span className="text-[10px] text-[#4B3F5C]">Synergia</span>
+                  <span className="text-[10px] text-[#4B3F5C]">Przykład</span>
                 </div>
               </div>
             </div>
@@ -440,7 +522,7 @@ export function LandingSections({
               <h2 className="font-display text-[clamp(1.65rem,3.3vw,2.6rem)] font-medium leading-[1.12] tracking-[-0.025em] text-[#111114]">
                 O Czym Milczą Ogólne
                 <br />
-                Prognozy Na 2027 Rok
+                Opisy Na 2027 Rok
               </h2>
               <p className="mt-2.5 max-w-md text-xs leading-relaxed text-[#4A4842] sm:text-sm">
                 Krótkie notatki redakcyjne o pieniądzach, relacjach i trudnych miesiącach 2027.
@@ -478,6 +560,10 @@ export function LandingSections({
                   <div className="overflow-hidden rounded-2xl bg-[#C5C0B3]">
                     <img
                       src={art.image}
+                      width={640}
+                      height={480}
+                      loading="lazy"
+                      decoding="async"
                       alt={art.imageAlt}
                       referrerPolicy="no-referrer"
                       className="aspect-[4/3] w-full object-cover transition-transform duration-300 hover:scale-[1.02]"
@@ -507,8 +593,8 @@ export function LandingSections({
         </div>
       </section>
 
-      {/* FOOTER (Exact Figma IMG_1431 bottom: oversized ©SOLARIS — 2027) */}
-      <footer className="mx-auto max-w-7xl px-4 pb-10 pt-12 sm:px-6 lg:px-8">
+      {/* FOOTER (Exact Figma IMG_1431 bottom + full legal links, seller info, GeoNames attribution, marketing opt-in) */}
+      <footer className="mx-auto max-w-7xl px-4 pb-12 pt-12 sm:px-6 lg:px-8">
         <div className="text-center">
           <p className="font-display text-[clamp(2.5rem,9vw,6.8rem)] font-bold leading-none tracking-[-0.04em] text-[#D8D8DF]">
             ©SOLARIS — 2027
@@ -517,13 +603,13 @@ export function LandingSections({
 
         <div className="mt-10 grid grid-cols-1 gap-8 border-t border-white/[0.08] pt-8 md:grid-cols-2">
           <div>
-            <p className="text-xs font-semibold text-white">Kontakt i pomoc</p>
+            <p className="text-xs font-semibold text-white">Kontakt i dane Sprzedawcy</p>
             <div className="mt-3 space-y-2.5 text-sm text-[#B4B4BE]">
               <a
-                href="mailto:kontakt@solaris2027.pl"
+                href={`mailto:${SELLER_LEGAL_CONFIG.contactEmail}`}
                 className="flex items-center justify-between border-b border-white/[0.08] pb-2 transition-colors hover:text-white"
               >
-                <span>kontakt@solaris2027.pl</span>
+                <span>{SELLER_LEGAL_CONFIG.contactEmail}</span>
                 <ArrowUpRight className="h-4 w-4 text-[#7D7D87]" aria-hidden="true" />
               </a>
               <button
@@ -531,17 +617,21 @@ export function LandingSections({
                 onClick={() => onStartFunnel('solo')}
                 className="flex w-full items-center justify-between border-b border-white/[0.08] pb-2 text-left transition-colors hover:text-white"
               >
-                <span>Oblicz darmowy skrót matrycy 2027</span>
+                <span>Oblicz darmowy podgląd na 2027 rok</span>
                 <ArrowUpRight className="h-4 w-4 text-[#7D7D87]" aria-hidden="true" />
               </button>
             </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-[#7D7D87]">
+              Sprzedawca: {SELLER_LEGAL_CONFIG.sellerName} · Adres: {SELLER_LEGAL_CONFIG.sellerAddress} ·{' '}
+              {SELLER_LEGAL_CONFIG.sellerNip}. Ceny w PLN brutto (od 14,99 zł do 44,99 zł za pełny pakiet).
+            </p>
           </div>
 
           <div>
             <p className="text-xs font-semibold text-white">
-              Nie chcesz teraz robić testu? Zostaw e-mail po przypomnienie i rabat -20%
+              Nie chcesz teraz robić quizu? Zostaw e-mail po przypomnienie i rabat -20%
             </p>
-            <form onSubmit={handleNewsletterSubmit} noValidate className="mt-3">
+            <form onSubmit={handleNewsletterSubmit} noValidate className="mt-3 space-y-2.5">
               <div className="flex items-center border-b border-white/[0.18] pb-2 focus-within:border-[#FF5C35]">
                 <label htmlFor="footer-reminder-email" className="sr-only">
                   Adres e-mail
@@ -562,10 +652,40 @@ export function LandingSections({
                   <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
+
+              {/* Separate UNCHECKED marketing consent checkbox (P1.11) */}
+              <label className="flex cursor-pointer items-start gap-2.5 text-[11px] leading-relaxed text-[#9A9AA3]">
+                <input
+                  type="checkbox"
+                  checked={newsletterConsent}
+                  onChange={(e) => {
+                    setNewsletterConsent(e.target.checked);
+                    if (newsletterStatus.type === 'error') {
+                      setNewsletterStatus({ type: 'idle', text: '' });
+                    }
+                  }}
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[#FF5C35]"
+                />
+                <span>
+                  {LEGAL_TEXTS.checkbox4Marketing} Szczegóły w{' '}
+                  <a
+                    href="/polityka-prywatnosci"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onOpenLegal('polityka');
+                    }}
+                    className="underline hover:text-white"
+                  >
+                    Polityce prywatności
+                  </a>
+                  .
+                </span>
+              </label>
+
               {newsletterStatus.type !== 'idle' && (
                 <p
                   role="status"
-                  className={`mt-2 text-xs ${
+                  className={`text-xs ${
                     newsletterStatus.type === 'ok' ? 'text-[#4ADE80]' : 'text-[#FF8566]'
                   }`}
                 >
@@ -576,28 +696,68 @@ export function LandingSections({
           </div>
         </div>
 
-        <div className="mt-8 flex flex-col items-start justify-between gap-4 border-t border-white/[0.06] pt-6 text-xs text-[#7D7D87] md:flex-row md:items-center">
-          <div className="flex flex-wrap items-center gap-5">
-            <button
-              type="button"
-              onClick={() => onOpenLegal('regulamin')}
-              className="min-h-[36px] transition-colors hover:text-white"
+        {/* Legal Links Bar (Real crawlable static HTML hrefs + interactive modal) */}
+        <div className="mt-8 flex flex-col items-start justify-between gap-4 border-t border-white/[0.06] pt-6 text-xs text-[#8E8E98] lg:flex-row lg:items-center">
+          <nav aria-label="Linki prawne" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <a
+              href="/regulamin"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenLegal('regulamin');
+              }}
+              className="min-h-[36px] inline-flex items-center transition-colors hover:text-white"
             >
               Regulamin
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenLegal('polityka')}
-              className="min-h-[36px] transition-colors hover:text-white"
+            </a>
+            <a
+              href="/polityka-prywatnosci"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenLegal('polityka');
+              }}
+              className="min-h-[36px] inline-flex items-center transition-colors hover:text-white"
             >
               Polityka prywatności
+            </a>
+            <a
+              href="/polityka-cookies"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenLegal('cookies');
+              }}
+              className="min-h-[36px] inline-flex items-center transition-colors hover:text-white"
+            >
+              Polityka cookies
+            </a>
+            <a
+              href="/odstapienie"
+              onClick={(e) => {
+                e.preventDefault();
+                onOpenLegal('odstapienie');
+              }}
+              className="min-h-[36px] inline-flex items-center transition-colors hover:text-white"
+            >
+              Odstąpienie od umowy
+            </a>
+            <button
+              type="button"
+              onClick={onOpenCookieSettings}
+              className="min-h-[36px] inline-flex items-center transition-colors hover:text-white"
+            >
+              Ustawienia cookies
             </button>
-          </div>
+            <a
+              href={`mailto:${SELLER_LEGAL_CONFIG.contactEmail}`}
+              className="min-h-[36px] inline-flex items-center transition-colors hover:text-white"
+            >
+              Kontakt
+            </a>
+          </nav>
 
-          <p className="max-w-xl text-[11px] leading-relaxed text-[#71717A] md:text-right">
-            Serwis Solaris 2027 ma charakter informacyjno-rozrywkowy i analityczny (efemerydy oraz analiza matrycy solarnej).
-            Raporty nie stanowią porady finansowej, inwestycyjnej, prawnej ani medycznej.
-          </p>
+          <div className="max-w-xl space-y-1 text-[11px] leading-relaxed text-[#71717A] lg:text-right">
+            <p>{LEGAL_TEXTS.footerShortDisclaimer}</p>
+            <p>Dane geograficzne: GeoNames.org</p>
+          </div>
         </div>
       </footer>
 
@@ -632,9 +792,13 @@ export function LandingSections({
               {activeArticle.title}
             </h3>
 
-            <div className="mt-4 overflow-hidden rounded-2xl">
+            <div className="mt-4 overflow-hidden rounded-2xl bg-[#1C1C20]">
               <img
                 src={activeArticle.image}
+                width={640}
+                height={400}
+                loading="lazy"
+                decoding="async"
                 alt={activeArticle.imageAlt}
                 referrerPolicy="no-referrer"
                 className="aspect-[16/10] w-full object-cover"

@@ -1,29 +1,36 @@
-import { X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
+import { LEGAL_DOCUMENTS, type LegalDocId } from '../data/legalDocuments';
 
 interface LegalModalProps {
-  doc: 'regulamin' | 'polityka' | null;
+  doc: LegalDocId | null;
   onClose: () => void;
 }
 
 export function LegalModal({ doc, onClose }: LegalModalProps) {
   if (!doc) return null;
+  const documentData = LEGAL_DOCUMENTS[doc];
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={doc === 'regulamin' ? 'Regulamin serwisu Solaris 2027' : 'Polityka prywatności'}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+      aria-label={documentData.title}
+      className="no-print fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-6"
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-xl overflow-y-auto rounded-t-[28px] border border-white/[0.12] bg-[#141418] p-5 text-white sm:rounded-[28px] sm:p-7"
+        className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-t-[28px] border border-white/[0.12] bg-[#141418] p-5 text-white sm:rounded-[28px] sm:p-7"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] pb-4">
-          <h2 className="font-display text-xl font-semibold text-white">
-            {doc === 'regulamin' ? 'Regulamin — Solaris 2027' : 'Polityka prywatności (RODO)'}
-          </h2>
+          <div>
+            <h2 className="font-display text-xl font-semibold text-white">
+              {documentData.title}
+            </h2>
+            <p className="mt-1 font-mono text-[11px] text-[#9A9AA3]">
+              Obowiązuje od: {documentData.effectiveDate} · Wersja {documentData.version}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -34,31 +41,77 @@ export function LegalModal({ doc, onClose }: LegalModalProps) {
           </button>
         </div>
 
-        {doc === 'regulamin' ? (
-          <div className="mt-4 space-y-3 text-xs leading-relaxed text-[#C4C4CE]">
-            <p>
-              <strong className="text-white">1. Charakter usługi:</strong> Serwis Solaris 2027 dostarcza cyfrowe opracowania analityczne o charakterze informacyjno-rozrywkowym oparte na efemerydach astronomicznych (Solariusz 2027) oraz kwestionariuszu preferencji. Raporty nie stanowią porady finansowej, inwestycyjnej, prawnej, psychologicznej ani medycznej.
-            </p>
-            <p>
-              <strong className="text-white">2. Dostarczanie treści cyfrowych i prawo odstąpienia:</strong> Zgodnie z art. 38 ust. 1 pkt 13 Ustawy z dnia 30 maja 2014 r. o prawach konsumenta, prawo odstąpienia od umowy zawartej na odległość nie przysługuje konsumentowi w odniesieniu do umów o dostarczanie treści cyfrowych niedostarczanych na nośniku materialnym, jeżeli spełnianie świadczenia rozpoczęło się za wyraźną zgodą konsumenta przed upływem terminu do odstąpienia od umowy.
-            </p>
-            <p>
-              <strong className="text-white">3. Płatności i reklamacje:</strong> Płatności realizowane są jednorazowo w PLN (bez ukrytych subskrypcji). Reklamacje techniczne można zgłaszać pod adresem kontakt@solaris2027.pl — rozpatrujemy je w terminie do 14 dni kalendarzowych.
-            </p>
-          </div>
-        ) : (
-          <div className="mt-4 space-y-3 text-xs leading-relaxed text-[#C4C4CE]">
-            <p>
-              <strong className="text-white">1. Zakres przetwarzanych danych:</strong> Przetwarzamy wyłącznie dane niezbędne do wygenerowania matrycy 2027 (imię, data, godzina i miasto urodzenia oraz odpowiedzi w krótkim kwestionariuszu), a w przypadku dobrowolnego zapisu — adres e-mail do przesłania skrótu raportu i przypomnienia.
-            </p>
-            <p>
-              <strong className="text-white">2. Czas przechowywania:</strong> Sesje raportowe przechowywane są maksymalnie przez 90 dni, po czym podlegają automatycznemu usunięciu.
-            </p>
-            <p>
-              <strong className="text-white">3. Twoje prawa:</strong> Masz prawo dostępu do danych, ich sprostowania, usunięcia oraz wycofania zgody na kontakt e-mail w dowolnym momencie, pisząc na kontakt@solaris2027.pl.
-            </p>
-          </div>
-        )}
+        <div className="mt-5 space-y-5 text-xs leading-relaxed text-[#D4D4DC]">
+          {documentData.sections.map((section) => (
+            <section key={section.heading} className="space-y-2">
+              <h3 className="font-display text-sm font-semibold text-white">
+                {section.heading}
+              </h3>
+
+              {section.paragraphs.map((p, idx) => (
+                <p key={idx}>{p}</p>
+              ))}
+
+              {section.bullets && (
+                <ul className="list-disc space-y-1.5 pl-5 text-[#C4C4CE]">
+                  {section.bullets.map((b, idx) => (
+                    <li key={idx}>{b}</li>
+                  ))}
+                </ul>
+              )}
+
+              {section.table && (
+                <div className="overflow-x-auto pt-1">
+                  <table className="w-full border-collapse text-left text-[11px]">
+                    <thead>
+                      <tr className="bg-white/[0.05] text-white">
+                        {section.table.headers.map((h) => (
+                          <th
+                            key={h}
+                            className="border border-white/[0.1] px-2.5 py-2 font-semibold"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {section.table.rows.map((row, rIdx) => (
+                        <tr key={rIdx}>
+                          {row.map((cell, cIdx) => (
+                            <td
+                              key={cIdx}
+                              className="border border-white/[0.08] px-2.5 py-2 align-top text-[#C4C4CE]"
+                            >
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-4 text-xs">
+          <a
+            href={documentData.path}
+            className="inline-flex items-center gap-1.5 font-medium text-[#FF7B5A] underline underline-offset-4 hover:text-white"
+          >
+            <span>Otwórz pełną wersję do wydruku ({documentData.path})</span>
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-[38px] items-center justify-center rounded-full bg-white/10 px-4 py-1.5 font-medium text-white hover:bg-white/20"
+          >
+            Zamknij
+          </button>
+        </div>
       </div>
     </div>
   );

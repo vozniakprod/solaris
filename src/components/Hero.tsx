@@ -3,9 +3,7 @@ import type { FunnelMode } from '../utils/solarisPricing';
 import { HeroBentoDashboard } from './HeroBentoDashboard';
 
 interface HeroProps {
-  selectedMode: FunnelMode;
-  onModeChange: (mode: FunnelMode) => void;
-  onStartFunnel: (mode: FunnelMode) => void;
+  onStartFunnel: (mode?: FunnelMode) => void;
   returningBanner: {
     personName: string;
     riskMonthPl: string;
@@ -13,12 +11,7 @@ interface HeroProps {
   } | null;
 }
 
-export function Hero({
-  selectedMode,
-  onModeChange,
-  onStartFunnel,
-  returningBanner,
-}: HeroProps) {
+export function Hero({ onStartFunnel, returningBanner }: HeroProps) {
   return (
     <section
       id="hero-top"
@@ -57,7 +50,7 @@ export function Hero({
         </svg>
       </div>
 
-      {/* Returning Non-Buyer Recovery Strip (Doжим) — shown ONLY if user previously created an unpaid report */}
+      {/* Returning Non-Buyer Recovery Strip (Дожим) — shown ONLY if user previously created an unpaid report */}
       {returningBanner && (
         <div className="mx-auto mb-6 flex max-w-2xl flex-col items-start justify-between gap-3 rounded-2xl border border-[#FF5C35]/40 bg-[#181314]/95 px-4 py-3 text-left sm:flex-row sm:items-center">
           <div className="text-xs leading-relaxed text-[#E4E4EA] sm:text-[13px]">
@@ -87,49 +80,22 @@ export function Hero({
           <span className="text-white">Kryzys Decyzji?</span>
         </h1>
 
-        <p className="mx-auto mt-3.5 max-w-[520px] text-balance text-sm leading-relaxed text-[#9A9AA3] sm:mt-4 sm:text-[15px]">
+        <p className="mx-auto mt-3.5 max-w-[530px] text-balance text-sm leading-relaxed text-[#9A9AA3] sm:mt-4 sm:text-[15px]">
           Bez ogólników i horoskopów z sieci. W 2 minuty sprawdzisz swój Solariusz 2027:
           konkretne okna na podwyżkę, trudne miesiące w relacjach i momenty, kiedy lepiej nie ryzykować.
         </p>
 
-        {/* Exact Figma Unified Dark Capsule -> Dual Mode Selector (Dla mnie | Dla dwojga) + Coral CTA */}
-        <div className="mx-auto mt-6 max-w-[500px] sm:mt-7">
-          <div className="flex flex-col gap-2 rounded-[26px] border border-white/[0.1] bg-[#1B1B1F]/95 p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] sm:flex-row sm:items-center sm:rounded-full">
-            <div
-              role="group"
-              aria-label="Wybierz tryb raportu"
-              className="grid flex-1 grid-cols-2 gap-1 rounded-full bg-[#111114] p-1"
-            >
-              <button
-                type="button"
-                onClick={() => onModeChange('solo')}
-                aria-pressed={selectedMode === 'solo'}
-                className={`min-h-[40px] whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35] sm:text-[13px] ${
-                  selectedMode === 'solo'
-                    ? 'bg-white/[0.12] text-white'
-                    : 'text-[#8E8E98] hover:text-white'
-                }`}
-              >
-                Tylko dla mnie
-              </button>
-              <button
-                type="button"
-                onClick={() => onModeChange('pair')}
-                aria-pressed={selectedMode === 'pair'}
-                className={`min-h-[40px] whitespace-nowrap rounded-full px-3.5 py-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35] sm:text-[13px] ${
-                  selectedMode === 'pair'
-                    ? 'bg-white/[0.12] text-white'
-                    : 'text-[#8E8E98] hover:text-white'
-                }`}
-              >
-                Dla dwojga
-              </button>
-            </div>
+        {/* Clean Single-CTA Figma Capsule (No duplicate Solo/Pair toggle — selection lives cleanly inside the test) */}
+        <div className="mx-auto mt-6 max-w-[480px] sm:mt-7">
+          <div className="flex flex-col items-center justify-between gap-2 rounded-[26px] border border-white/[0.1] bg-[#1B1B1F]/95 p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.45)] sm:flex-row sm:rounded-full sm:pl-5">
+            <span className="whitespace-nowrap pt-1.5 text-xs font-medium text-[#A1A1AA] sm:pt-0 sm:text-[13px]">
+              Solariusz 2027 · <span className="text-white">0 zł na start</span>
+            </span>
 
             <button
               type="button"
-              onClick={() => onStartFunnel(selectedMode)}
-              className="inline-flex min-h-[48px] shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#FF5C35] px-6 py-2.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#FF6E4B] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:min-h-[46px]"
+              onClick={() => onStartFunnel()}
+              className="inline-flex min-h-[48px] w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-[#FF5C35] px-6 py-2.5 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#FF6E4B] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:min-h-[46px] sm:w-auto"
             >
               <span>Sprawdź swój 2027</span>
               <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -137,20 +103,14 @@ export function Hero({
           </div>
 
           <p className="mt-3 text-xs text-[#8E8E98]">
-            Bez logowania <span aria-hidden="true">·</span> Darmowy skrót od razu po 5 pytaniach{' '}
+            Bez logowania <span aria-hidden="true">·</span> Wybór solo lub para w 1. kroku{' '}
             <span aria-hidden="true">·</span> Silnik efemeryd 2027
           </p>
         </div>
       </div>
 
       {/* Signature 4-Card Figma Bento Preview */}
-      <HeroBentoDashboard
-        selectedMode={selectedMode}
-        onStartWithMode={(mode) => {
-          onModeChange(mode);
-          onStartFunnel(mode);
-        }}
-      />
+      <HeroBentoDashboard onStartWithMode={(mode) => onStartFunnel(mode)} />
     </section>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Home, Menu, X } from 'lucide-react';
 
 export type AppView = 'landing' | 'funnel' | 'calculating' | 'report';
-export type NavSectionId = 'start' | 'co-dostajesz' | 'opinie' | 'zgodnosc' | 'artykuly';
+export type NavSectionId = 'start' | 'co-dostajesz' | 'przyklady' | 'zgodnosc' | 'artykuly';
 
 interface HeaderProps {
   view: AppView;
@@ -17,7 +17,7 @@ interface HeaderProps {
 const NAV_LINKS: ReadonlyArray<{ id: NavSectionId; label: string }> = [
   { id: 'start', label: 'Start' },
   { id: 'co-dostajesz', label: 'Co dostajesz' },
-  { id: 'opinie', label: 'Opinie' },
+  { id: 'przyklady', label: 'Przykłady' },
   { id: 'zgodnosc', label: 'Zgodność' },
   { id: 'artykuly', label: 'Analizy' },
 ];

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { Header, type AppView, type NavSectionId } from './components/Header';
 import { Hero } from './components/Hero';
 import { LandingSections } from './components/LandingSections';
-import { QuizFunnel } from './components/QuizFunnel';
+import { FORM_DRAFT_STORAGE_KEY, QuizFunnel } from './components/QuizFunnel';
 import { CalculatingScreen } from './components/CalculatingScreen';
 import { ReportDashboard, type UnlockState } from './components/ReportDashboard';
 import { LegalModal } from './components/LegalModal';
+import { CookieBanner } from './components/CookieBanner';
+import { LEGAL_TEXTS, type LegalDocId } from './data/legalDocuments';
 import type {
   PersonInput,
   QuizAnswers,
@@ -13,7 +15,7 @@ import type {
 } from './utils/ephemerisEngine';
 import type { FunnelMode, RelationType } from './utils/solarisPricing';
 
-const STORAGE_KEY = 'solaris_2027_session_v1';
+const STORAGE_KEY = 'solaris_2027_session_v2';
 
 interface PersistedSession {
   report: SolarisFullReport;
@@ -30,11 +32,13 @@ interface PendingPayload {
 }
 
 const INITIAL_UNLOCK: UnlockState = {
+  paid: false,
   unlockedModules: [],
   calendarUnlocked: false,
   pdfUnlocked: false,
   orderId: null,
   firstPurchaseAtMs: null,
+  confirmation: null,
 };
 
 function loadPersistedSession(): PersistedSession | null {
@@ -43,7 +47,13 @@ function loadPersistedSession(): PersistedSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSession;
     if (!parsed?.report?.sessionId) return null;
-    return parsed;
+    return {
+      ...parsed,
+      unlockState: {
+        ...INITIAL_UNLOCK,
+        ...(parsed.unlockState ?? {}),
+      },
+    };
   } catch {
     return null;
   }
@@ -58,7 +68,50 @@ export default function App() {
   const [selectedMode, setSelectedMode] = useState<FunnelMode>('solo');
   const [pendingPayload, setPendingPayload] = useState<PendingPayload | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
-  const [legalDoc, setLegalDoc] = useState<'regulamin' | 'polityka' | null>(null);
+  const [legalDoc, setLegalDoc] = useState<LegalDocId | null>(null);
+  const [cookieSettingsOpen, setCookieSettingsOpen] = useState(false);
+
+  // Server-authoritative session sync on load; strictly ignores `?paid=1` query params (P0.6)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlSessionId = params.get('raport')?.trim();
+    const targetSessionId = urlSessionId || persisted?.report.sessionId;
+    if (!targetSessionId) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/report/${encodeURIComponent(targetSessionId)}`);
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as {
+          report?: SolarisFullReport;
+          unlockState?: UnlockState;
+        };
+        if (!json.report || !json.unlockState || cancelled) return;
+
+        setPersisted((prev) => ({
+          report: json.report!,
+          // Always trust server unlockState rather than client URL flags (?paid=1 is ignored!)
+          unlockState: {
+            ...INITIAL_UNLOCK,
+            ...json.unlockState!,
+          },
+          hasRetentionDiscount: prev?.hasRetentionDiscount ?? false,
+        }));
+        if (urlSessionId) {
+          setView('report');
+        }
+      } catch {
+        // Keep local persisted state if server restarted
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Run once on initial mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try {
@@ -86,8 +139,8 @@ export default function App() {
     }, 30);
   };
 
-  const handleStartFunnel = (mode: FunnelMode) => {
-    setSelectedMode(mode);
+  const handleStartFunnel = (mode?: FunnelMode) => {
+    setSelectedMode(mode ?? 'solo');
     setView('funnel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -98,40 +151,62 @@ export default function App() {
     setView('calculating');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+
     try {
       const [response] = await Promise.all([
         fetch('/api/report/teaser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
+          signal: controller.signal,
         }),
-        new Promise((resolve) => window.setTimeout(resolve, 1300)),
+        new Promise((resolve) => window.setTimeout(resolve, 1100)),
       ]);
+
+      window.clearTimeout(timeoutId);
 
       const json = (await response.json()) as {
         report?: SolarisFullReport;
+        unlockState?: UnlockState;
+        code?: string;
         error?: string;
       };
 
       if (!response.ok || !json.report) {
-        setCalcError(json.error || 'Nie udało się wygenerować raportu.');
+        if (json.code === 'PLACE_NOT_FOUND') {
+          setCalcError(json.error || LEGAL_TEXTS.cityNotFoundError);
+        } else if (json.code === 'VALIDATION_ERROR' || json.code === 'RATE_LIMITED') {
+          setCalcError(json.error || LEGAL_TEXTS.serverCalcError);
+        } else {
+          setCalcError(json.error || LEGAL_TEXTS.serverCalcError);
+        }
         return;
       }
 
       setPersisted({
         report: json.report,
-        unlockState: INITIAL_UNLOCK,
+        unlockState: json.unlockState ? { ...INITIAL_UNLOCK, ...json.unlockState } : INITIAL_UNLOCK,
         hasRetentionDiscount: false,
       });
       setView('report');
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      setCalcError('Błąd połączenia z serwerem obliczeniowym. Spróbuj ponownie.');
+    } catch (err) {
+      window.clearTimeout(timeoutId);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setCalcError(
+          `Przekroczono czas oczekiwania na odpowiedź serwera. ${LEGAL_TEXTS.serverCalcError}`,
+        );
+      } else {
+        setCalcError(LEGAL_TEXTS.serverCalcError);
+      }
     }
   };
 
   const handleSaveFollowUpEmail = async (
     email: string,
+    marketingConsent: boolean,
   ): Promise<{ ok: boolean; message: string }> => {
     try {
       const response = await fetch('/api/followup/save', {
@@ -139,6 +214,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
+          marketingConsent,
           sessionId: persisted?.report.sessionId ?? 'landing-visitor',
         }),
       });
@@ -146,7 +222,7 @@ export default function App() {
       if (!response.ok || !json.ok) {
         return {
           ok: false,
-          message: json.error || 'Wpisz poprawny adres e-mail.',
+          message: json.error || 'Wpisz poprawny adres e-mail i zaznacz zgodę.',
         };
       }
       return {
@@ -156,12 +232,11 @@ export default function App() {
           'Zapisaliśmy Twój adres. Rabat -20% na pełny pakiet jest gotowy.',
       };
     } catch {
-      return { ok: false, message: 'Błąd połączenia. Spróbuj ponownie.' };
+      return { ok: false, message: LEGAL_TEXTS.serverCalcError };
     }
   };
 
   const handleBackToLanding = () => {
-    // If leaving an unpaid report, gently activate returning non-buyer recovery (-20%)
     if (
       view === 'report' &&
       persisted &&
@@ -209,14 +284,13 @@ export default function App() {
       {view === 'landing' && (
         <main>
           <Hero
-            selectedMode={selectedMode}
-            onModeChange={setSelectedMode}
             onStartFunnel={handleStartFunnel}
             returningBanner={returningBanner}
           />
           <LandingSections
             onStartFunnel={handleStartFunnel}
             onOpenLegal={setLegalDoc}
+            onOpenCookieSettings={() => setCookieSettingsOpen(true)}
             onSaveNewsletterEmail={handleSaveFollowUpEmail}
           />
         </main>
@@ -226,6 +300,7 @@ export default function App() {
         <QuizFunnel
           initialMode={selectedMode}
           onCancel={() => setView('landing')}
+          onOpenLegal={setLegalDoc}
           onSubmitComplete={runTeaserCalculation}
         />
       )}
@@ -260,6 +335,11 @@ export default function App() {
           onSaveFollowUpEmail={handleSaveFollowUpEmail}
           onOpenLegal={setLegalDoc}
           onStartFresh={() => {
+            try {
+              window.localStorage.removeItem(FORM_DRAFT_STORAGE_KEY);
+            } catch {
+              // ignore
+            }
             setPersisted(null);
             setView('funnel');
             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -268,6 +348,11 @@ export default function App() {
       )}
 
       <LegalModal doc={legalDoc} onClose={() => setLegalDoc(null)} />
+      <CookieBanner
+        forceOpenSettings={cookieSettingsOpen}
+        onCloseSettings={() => setCookieSettingsOpen(false)}
+        onOpenLegal={setLegalDoc}
+      />
     </div>
   );
 }

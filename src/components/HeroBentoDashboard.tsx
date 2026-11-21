@@ -1,10 +1,9 @@
 import { useState } from 'react';
-import { Calendar, Check, Clock, Lock, MoreHorizontal } from 'lucide-react';
+import { Calendar, Check, Clock, Lock } from 'lucide-react';
 import type { FunnelMode } from '../utils/solarisPricing';
 
 interface HeroBentoDashboardProps {
-  selectedMode: FunnelMode;
-  onStartWithMode: (mode: FunnelMode) => void;
+  onStartWithMode: (mode?: FunnelMode) => void;
 }
 
 const MONTH_LABELS = ['Sty', 'Mar', 'Maj', 'Lip', 'Wrz', 'Lis'];
@@ -39,10 +38,7 @@ function buildSmoothSvgPath(values: number[], width: number, height: number): st
   return d;
 }
 
-export function HeroBentoDashboard({
-  selectedMode,
-  onStartWithMode,
-}: HeroBentoDashboardProps) {
+export function HeroBentoDashboard({ onStartWithMode }: HeroBentoDashboardProps) {
   const [chartTab, setChartTab] = useState<'energia' | 'ryzyko'>('energia');
 
   const primarySeries = chartTab === 'energia' ? SAMPLE_SOLO_ENERGY : SAMPLE_SOLO_RISK;
@@ -67,7 +63,7 @@ export function HeroBentoDashboard({
                 Przykład: Finanse i Ryzyko
               </h2>
               <p className="mt-0.5 text-xs text-[#7D7D87]">
-                Przykładowy wykres z raportu 2027
+                Dane poglądowe · przykładowy wykres 2027
               </p>
             </div>
             <span className="font-mono shrink-0 border-b border-white/25 pb-0.5 text-sm font-medium tabular-nums text-white">
@@ -158,11 +154,13 @@ export function HeroBentoDashboard({
         {/* Card 2 Column: Warm Ivory Teaser Alerts + 2 Bottom Stat Tiles */}
         <div className="flex flex-col gap-3.5">
           <article className="flex-1 rounded-[22px] bg-[#F5F3EC] p-4 text-[#111114]">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="font-display text-[14px] font-semibold tracking-[-0.01em] text-[#111114]">
                 Przykładowe alerty
               </h2>
-              <MoreHorizontal className="h-4 w-4 text-[#6B6B73]" aria-hidden="true" />
+              <span className="font-mono text-[10px] font-medium uppercase text-[#6B6B73]">
+                Przykład
+              </span>
             </div>
 
             <div className="mt-3 space-y-2">
@@ -227,11 +225,11 @@ export function HeroBentoDashboard({
                   <Check className="h-3.5 w-3.5 stroke-[2.5]" aria-hidden="true" />
                 </span>
                 <span className="text-[11px] font-medium leading-tight text-[#D4D4DC]">
-                  {selectedMode === 'pair' ? 'Zgodność' : 'Indeks 2027'}
+                  Indeks 2027
                 </span>
               </div>
               <p className="mt-3.5 font-mono text-xl font-medium tabular-nums text-white">
-                {selectedMode === 'pair' ? '87%' : '84%'}
+                84%
               </p>
             </article>
           </div>
@@ -243,8 +241,8 @@ export function HeroBentoDashboard({
             <h2 className="font-display text-[14px] font-semibold text-[#111114]">
               Presja vs Wzrost
             </h2>
-            <span className="font-mono text-[11px] font-medium tabular-nums text-[#4C1D95]">
-              2027
+            <span className="font-mono text-[10px] font-medium uppercase text-[#4C1D95]">
+              Dane poglądowe
             </span>
           </div>
 
@@ -348,7 +346,7 @@ export function HeroBentoDashboard({
 
               <button
                 type="button"
-                onClick={() => onStartWithMode(selectedMode)}
+                onClick={() => onStartWithMode()}
                 className="flex min-h-[50px] w-full items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-left transition-colors duration-150 hover:border-white/20"
               >
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/25" />
