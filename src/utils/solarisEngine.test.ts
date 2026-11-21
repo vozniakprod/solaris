@@ -359,7 +359,7 @@ test('OpenAI editorial engine enforces Polish safety rules, omits houses on unkn
 
 test('resolveSafeBaseUrl resolves Vercel forwarded host/proto safely and blocks host injection', async () => {
   const { resolveSafeBaseUrl } = await import('../server/createApiApp');
-  const vercelApp = (await import('../../api/index')).default;
+  const vercelApp = (await import('../server/vercelEntry')).default;
   assert.equal(typeof vercelApp, 'function');
 
   const prevAppUrl = process.env.APP_URL;
