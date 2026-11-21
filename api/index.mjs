@@ -4468,9 +4468,13 @@ function maskEmailForUi(email) {
 }
 function buildFullReportEmailPayload(params) {
   const { report, unlockedModules, calendarUnlocked, confirmation } = params;
+  const resolvedBaseUrl = (params.baseUrl || SELLER_LEGAL_CONFIG.domain).replace(/\/+$/, "");
   const uniqueUnlocked = Array.from(new Set(unlockedModules)).filter(
     (id) => Boolean(report.modules[id])
   );
+  const availableModules = getAvailableModulesForMode(report.mode);
+  const lockedModules = availableModules.filter((m) => !uniqueUnlocked.includes(m.id));
+  const isFullBundle = lockedModules.length === 0;
   const safeName = escapeHtml2(report.person1.name);
   const safeCoreTitle = escapeHtml2(report.freeCoreVectorTitle);
   const safeCoreBody = escapeHtml2(report.freeCoreVectorBody);
@@ -4515,17 +4519,93 @@ function buildFullReportEmailPayload(params) {
         </div>
       `;
   }).join("\n");
-  const monthsHtml = report.monthlyTimeline.map(
-    (m) => `
+  const peakMonthIdx = report.monthlyTimeline.reduce(
+    (best, curr) => curr.energy > best.energy ? curr : best,
+    report.monthlyTimeline[0]
+  )?.monthIndex;
+  const riskMonthIdx = report.monthlyTimeline.reduce(
+    (worst, curr) => curr.risk > worst.risk ? curr : worst,
+    report.monthlyTimeline[0]
+  )?.monthIndex;
+  const monthsHtml = report.monthlyTimeline.map((m) => {
+    const showFullAction = isFullBundle || m.monthIndex === peakMonthIdx || m.monthIndex === riskMonthIdx;
+    const detailHtml = showFullAction ? escapeHtml2(m.actionNote) : '<span style="color:#6E6B63;">Szczeg\xF3\u0142owy plan decyzji na ten miesi\u0105c w pe\u0142nym pakiecie Solaris 2027.</span>';
+    return `
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #E5E1D6;font-weight:600;color:#111114;white-space:nowrap;">${escapeHtml2(m.monthFull)}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #E5E1D6;font-family:monospace;font-size:12px;color:#3E3C37;white-space:nowrap;">Energia ${m.energy}% \xB7 Ryzyko ${m.risk}%</td>
         <td style="padding:10px 12px;border-bottom:1px solid #E5E1D6;font-size:13px;line-height:1.5;color:#2B2A26;">
-          <strong>${escapeHtml2(m.headline)}</strong><br/>${escapeHtml2(m.actionNote)}
+          <strong>${escapeHtml2(m.headline)}</strong><br/>${detailHtml}
         </td>
       </tr>
-    `
-  ).join("\n");
+    `;
+  }).join("\n");
+  let conversionBlockHtml = "";
+  let conversionBlockText = "";
+  if (!isFullBundle) {
+    const lockedItemsHtml = lockedModules.map((m) => {
+      const mod = report.modules[m.id];
+      return `
+          <li style="margin:0 0 10px;padding:12px 14px;border-radius:12px;background:#1A1A20;border:1px solid #2A2A33;">
+            <p style="margin:0;font-family:monospace;font-size:11px;color:#FF8566;">
+              ZABLOKOWANE \xB7 ${escapeHtml2(m.shortTitle)} (${mod.scoreOutOf10}/10)
+            </p>
+            <p style="margin:4px 0 0;font-size:14px;font-weight:600;color:#FFFFFF;">
+              ${escapeHtml2(mod.teaserTitle)}
+            </p>
+          </li>
+        `;
+    }).join("");
+    const calendarExtraLine = !calendarUnlocked ? '<p style="margin:0 0 14px;font-size:13px;line-height:1.55;color:#D8B4FE;">+ W pe\u0142nym rozszerzeniu dostajesz tak\u017Ce gotowy plik <strong>Kalendarz .ics (12 okien)</strong> do Apple / Google Calendar oraz wersj\u0119 PDF A4.</p>' : "";
+    conversionBlockHtml = `
+      <div style="margin:0 0 22px;padding:24px;border-radius:20px;background:#111114;color:#FFFFFF;border:2px solid #FF5C35;">
+        <p style="margin:0;font-family:monospace;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#FF8566;">
+          POZOSTA\u0141E ZABLOKOWANE OBSZARY (${lockedModules.length})
+        </p>
+        <h2 style="margin:8px 0 10px;font-size:20px;line-height:1.25;color:#FFFFFF;">
+          Masz ju\u017C dost\u0119p do ${uniqueUnlocked.length === 1 ? "1 sfery" : `${uniqueUnlocked.length} sfer`}. Zobacz, czego jeszcze nie widzisz w 2027:
+        </h2>
+        <ul style="margin:0 0 14px;padding:0;list-style:none;">
+          ${lockedItemsHtml}
+        </ul>
+        ${calendarExtraLine}
+        <a href="${escapeHtml2(confirmation.reportUrl)}" style="display:inline-block;padding:13px 24px;border-radius:999px;background:#FF5C35;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">
+          Odblokuj reszt\u0119 raportu + .ics za 19,99 z\u0142 \u2192
+        </a>
+        <p style="margin:10px 0 0;font-size:11px;color:#A1A1AA;">
+          Jednorazowa dop\u0142ata (zamiast kupowa\u0107 ka\u017Cd\u0105 sfer\u0119 osobno). Po op\u0142aceniu pe\u0142ny raport otworzy si\u0119 od razu i trafi na Tw\xF3j e-mail.
+        </p>
+      </div>
+    `;
+    conversionBlockText = [
+      `ZABLOKOWANE OBSZARY TWOJEGO 2027 (${lockedModules.length}):`,
+      ...lockedModules.map((m) => `- ${m.shortTitle} (${report.modules[m.id].scoreOutOf10}/10): ${report.modules[m.id].teaserTitle}`),
+      `Dobierz pozosta\u0142e obszary + kalendarz .ics za 19,99 z\u0142: ${confirmation.reportUrl}`
+    ].join("\n");
+  } else if (report.mode === "solo") {
+    const pairUrl = `${resolvedBaseUrl}/?tryb=para`;
+    conversionBlockHtml = `
+      <div style="margin:0 0 22px;padding:24px;border-radius:20px;background:#D6D1C4;color:#111114;">
+        <p style="margin:0;font-family:monospace;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#8C321A;">
+          TRYB DLA DWOJGA \xB7 ZGODNO\u015A\u0106 2027
+        </p>
+        <h2 style="margin:8px 0 10px;font-size:20px;line-height:1.25;color:#111114;">
+          Znasz ju\u017C sw\xF3j 2027. Sprawd\u017A, czy Ty i bliska osoba idziecie w tym samym rytmie
+        </h2>
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#383631;">
+          Dlaczego w 2027 roku w niekt\xF3rych relacjach pojawi si\u0119 kryzys, a inne wejd\u0105 na nowy poziom? Zestaw daty urodzenia (para, przyjaciel lub wsp\xF3lnik) i odbierz bezp\u0142atny indeks zgodno\u015Bci w 2 minuty.
+        </p>
+        <a href="${escapeHtml2(pairUrl)}" style="display:inline-block;padding:13px 24px;border-radius:999px;background:#111114;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">
+          Sprawd\u017A matryc\u0119 Dla dwojga (0 z\u0142 na start) \u2192
+        </a>
+      </div>
+    `;
+    conversionBlockText = [
+      "TRYB DLA DWOJGA \u2014 ZGODNO\u015A\u0106 2027:",
+      "Znasz ju\u017C sw\xF3j 2027. Sprawd\u017A bezp\u0142atny wynik zgodno\u015Bci z partnerem, przyjacielem lub wsp\xF3lnikiem w 2 minuty:",
+      pairUrl
+    ].join("\n");
+  }
   const pairHtml = report.mode === "pair" && report.person2 && report.compatibilityScore !== null ? `
         <div style="margin:0 0 22px;padding:20px;border-radius:16px;background:#F3E8FF;border:1px solid #D8B4FE;">
           <p style="margin:0;font-family:monospace;font-size:11px;text-transform:uppercase;color:#5B21B6;">
@@ -4592,12 +4672,14 @@ function buildFullReportEmailPayload(params) {
 
     ${modulesHtml}
 
+    ${conversionBlockHtml}
+
     <div style="margin:0 0 22px;padding:20px;border-radius:16px;background:#FFFFFF;border:1px solid #E5E1D6;">
       <p style="margin:0;font-family:monospace;font-size:11px;text-transform:uppercase;color:#57544D;">
         O\u015B 12 miesi\u0119cy 2027
       </p>
       <h2 style="margin:6px 0 14px;font-size:19px;color:#111114;">
-        Tw\xF3j harmonogram Stycze\u0144 \u2013 Grudzie\u0144 2027
+        ${isFullBundle ? "Tw\xF3j pe\u0142ny harmonogram Stycze\u0144 \u2013 Grudzie\u0144 2027" : "Skr\xF3t osi 12 miesi\u0119cy 2027 (szczyt i miesi\u0105c ryzyka)"}
       </h2>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
         ${monthsHtml}
@@ -4641,11 +4723,13 @@ function buildFullReportEmailPayload(params) {
       `Punkt kontrolny: ${mod.checkpoint}`
     ].join("\n");
   }).join("\n\n");
-  const monthsText = report.monthlyTimeline.map(
-    (m) => `- ${m.monthFull} (Energia ${m.energy}% / Ryzyko ${m.risk}%): ${m.headline} \u2014 ${m.actionNote}`
-  ).join("\n");
+  const monthsText = report.monthlyTimeline.map((m) => {
+    const showFullAction = isFullBundle || m.monthIndex === peakMonthIdx || m.monthIndex === riskMonthIdx;
+    const note = showFullAction ? m.actionNote : "Szczeg\xF3\u0142owy plan decyzji w pe\u0142nym pakiecie Solaris 2027.";
+    return `- ${m.monthFull} (Energia ${m.energy}% / Ryzyko ${m.risk}%): ${m.headline} \u2014 ${note}`;
+  }).join("\n");
   const text = [
-    `SOLARIS 2027 \u2014 TW\xD3J PE\u0141NY RAPORT (${confirmation.orderId})`,
+    `SOLARIS 2027 \u2014 TW\xD3J RAPORT (${confirmation.orderId})`,
     "",
     report.freeCoreVectorTitle,
     report.freeCoreVectorBody,
@@ -4657,6 +4741,7 @@ function buildFullReportEmailPayload(params) {
     report.freeOpenInsightBody,
     "",
     modulesText,
+    ...conversionBlockText ? ["", conversionBlockText] : [],
     "",
     "O\u015A 12 MIESI\u0118CY 2027:",
     monthsText,
@@ -4680,7 +4765,21 @@ function buildFullReportEmailPayload(params) {
   };
 }
 function buildFollowUpReminderEmailPayload(params) {
-  const safeBaseUrl = escapeHtml2(params.baseUrl);
+  const targetUrl = params.reportUrl || params.baseUrl;
+  const safeTargetUrl = escapeHtml2(targetUrl);
+  const safePersonName = params.personName?.trim() ? escapeHtml2(params.personName.trim()) : "";
+  const safePeak = params.peakMonthPl?.trim() ? escapeHtml2(params.peakMonthPl.trim()) : "";
+  const safeRisk = params.riskMonthPl?.trim() ? escapeHtml2(params.riskMonthPl.trim()) : "";
+  const hasPersonalizedHook = Boolean(safeRisk);
+  const headline = hasPersonalizedHook ? `${safePersonName ? `${safePersonName}, ` : ""}Tw\xF3j miesi\u0105c napi\u0119\u0107 w 2027 to ${safeRisk} \u2014 sprawd\u017A plan z rabatem -20%` : "Tw\xF3j rabat -20% na Pe\u0142ny Raport Solaris 2027 jest gotowy";
+  const personalizedBoxHtml = hasPersonalizedHook ? `
+      <div style="margin:0 0 18px;padding:14px 16px;border-radius:14px;background:#1A1A20;border:1px solid #2A2A33;">
+        ${safePeak ? `<p style="margin:0 0 6px;font-size:13px;color:#4ADE80;"><strong>Okno wzrostu 2027:</strong> ${safePeak}</p>` : ""}
+        <p style="margin:0;font-size:13px;color:#FF8566;">
+          <strong>Miesi\u0105c podwy\u017Cszonego tarcia:</strong> ${safeRisk} \u2014 w pe\u0142nym raporcie masz dok\u0142adne daty, czego nie podpisywa\u0107 w ciemno oraz 3 kroki na 2027.
+        </p>
+      </div>
+    ` : "";
   const html = `<!doctype html>
 <html lang="pl">
 <head><meta charset="UTF-8" /></head>
@@ -4690,14 +4789,15 @@ function buildFollowUpReminderEmailPayload(params) {
       <p style="margin:0;font-family:monospace;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#FF7B5A;">
         SOLARIS 2027 \xB7 RABAT POWROTNY -20%
       </p>
-      <h1 style="margin:10px 0 10px;font-size:23px;line-height:1.25;color:#FFFFFF;">
-        Tw\xF3j rabat -20% na Pe\u0142ny Raport Solaris 2027 jest gotowy
+      <h1 style="margin:10px 0 12px;font-size:23px;line-height:1.25;color:#FFFFFF;">
+        ${headline}
       </h1>
+      ${personalizedBoxHtml}
       <p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:#D4D4DC;">
-        Zapisali\u015Bmy Tw\xF3j adres. Gdy b\u0119dziesz gotowy/a wr\xF3ci\u0107 po pe\u0142n\u0105 map\u0119 2027 roku (wszystkie sfery + kalendarz .ics + wersja PDF A4), pe\u0142ny pakiet kosztuje <strong>35,99 z\u0142</strong> zamiast 44,99 z\u0142.
+        Zapisali\u015Bmy Tw\xF3j skr\xF3t. Gdy wr\xF3cisz po pe\u0142ny raport 2027 (wszystkie sfery + kalendarz .ics do telefonu + PDF A4), pe\u0142ny pakiet kosztuje <strong>35,99 z\u0142</strong> zamiast 44,99 z\u0142. Mo\u017Cesz te\u017C zacz\u0105\u0107 od 1 wybranej sfery za 14,99 z\u0142.
       </p>
-      <a href="${safeBaseUrl}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:#FF5C35;color:#FFFFFF;text-decoration:none;font-weight:600;font-size:14px;">
-        Wr\xF3\u0107 do Solaris 2027 \u2192
+      <a href="${safeTargetUrl}" style="display:inline-block;padding:13px 24px;border-radius:999px;background:#FF5C35;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">
+        Wr\xF3\u0107 do raportu z rabatem -20% \u2192
       </a>
     </div>
     <p style="margin:16px 0 0;font-size:11px;line-height:1.6;color:#57544D;">
@@ -4707,15 +4807,17 @@ function buildFollowUpReminderEmailPayload(params) {
 </body>
 </html>`;
   const text = [
-    "SOLARIS 2027 \u2014 Tw\xF3j rabat powrotny -20%",
+    hasPersonalizedHook ? `SOLARIS 2027 \u2014 Tw\xF3j miesi\u0105c napi\u0119\u0107 (${params.riskMonthPl}) + rabat -20%` : "SOLARIS 2027 \u2014 Tw\xF3j rabat powrotny -20%",
     "",
-    "Zapisali\u015Bmy Tw\xF3j adres. Pe\u0142ny Raport Solaris 2027 (wszystkie obszary + kalendarz .ics + PDF A4) z rabatem -20% kosztuje 35,99 z\u0142 zamiast 44,99 z\u0142.",
-    `Wr\xF3\u0107 do serwisu: ${params.baseUrl}`,
+    ...params.peakMonthPl ? [`Okno wzrostu 2027: ${params.peakMonthPl}`] : [],
+    ...params.riskMonthPl ? [`Miesi\u0105c podwy\u017Cszonego tarcia: ${params.riskMonthPl}`] : [],
+    "Pe\u0142ny Raport Solaris 2027 (wszystkie obszary + kalendarz .ics + PDF A4) z rabatem -20% kosztuje 35,99 z\u0142 zamiast 44,99 z\u0142.",
+    `Wr\xF3\u0107 do raportu: ${targetUrl}`,
     "",
     `Zgod\u0119 na wiadomo\u015Bci e-mail mo\u017Cesz wycofa\u0107 w ka\u017Cdej chwili: ${SELLER_LEGAL_CONFIG.contactEmail}`
   ].join("\n");
   return {
-    subject: "Solaris 2027 \u2014 Tw\xF3j rabat powrotny -20% na pe\u0142ny raport",
+    subject: hasPersonalizedHook ? `Solaris 2027 \u2014 Tw\xF3j miesi\u0105c napi\u0119\u0107 (${params.riskMonthPl}) + rabat -20%` : "Solaris 2027 \u2014 Tw\xF3j rabat powrotny -20% na pe\u0142ny raport",
     html,
     text
   };
@@ -4903,7 +5005,8 @@ async function deliverPaidReportEmail(params) {
     report,
     unlockedModules: unlockState.unlockedModules,
     calendarUnlocked: unlockState.calendarUnlocked,
-    confirmation
+    confirmation,
+    baseUrl
   });
   const sendResult = await sendEmailViaResend({
     apiKey: process.env.RESEND_API_KEY,
@@ -5654,7 +5757,18 @@ function createApiApp(options) {
     let emailSent = false;
     if (isResendConfigured(process.env.RESEND_API_KEY)) {
       const baseUrl = resolveSafeBaseUrl(req, fallbackPort);
-      const reminderPayload = buildFollowUpReminderEmailPayload({ baseUrl });
+      const stored = sessionId && sessionId !== "guest" && sessionId !== "landing-visitor" ? sessionStore.get(sessionId) : void 0;
+      const personName = stored?.report.person1.name || (typeof body.personName === "string" ? body.personName.trim().slice(0, 60) : "");
+      const peakMonthPl = stored?.report.peakMonthPl || (typeof body.peakMonthPl === "string" ? body.peakMonthPl.trim().slice(0, 40) : "");
+      const riskMonthPl = stored?.report.riskMonthPl || (typeof body.riskMonthPl === "string" ? body.riskMonthPl.trim().slice(0, 40) : "");
+      const reportUrl = sessionId && sessionId !== "guest" && sessionId !== "landing-visitor" ? `${baseUrl}/?raport=${encodeURIComponent(sessionId)}` : baseUrl;
+      const reminderPayload = buildFollowUpReminderEmailPayload({
+        baseUrl,
+        personName: personName || void 0,
+        peakMonthPl: peakMonthPl || void 0,
+        riskMonthPl: riskMonthPl || void 0,
+        reportUrl
+      });
       const sent = await sendEmailViaResend({
         apiKey: process.env.RESEND_API_KEY,
         from: process.env.EMAIL_FROM,

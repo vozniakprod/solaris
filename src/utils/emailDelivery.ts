@@ -1,5 +1,8 @@
 import type { SolarisFullReport } from './ephemerisEngine.js';
-import type { ReportModuleId } from './solarisPricing.js';
+import {
+  getAvailableModulesForMode,
+  type ReportModuleId,
+} from './solarisPricing.js';
 import { buildSolaris2027Ics } from './icsExport.js';
 import {
   LEGAL_TEXTS,
@@ -64,12 +67,17 @@ export function buildFullReportEmailPayload(params: {
   unlockedModules: ReportModuleId[];
   calendarUnlocked: boolean;
   confirmation: DurableOrderConfirmation;
+  baseUrl?: string;
 }): EmailPayload {
   const { report, unlockedModules, calendarUnlocked, confirmation } = params;
+  const resolvedBaseUrl = (params.baseUrl || SELLER_LEGAL_CONFIG.domain).replace(/\/+$/, '');
 
   const uniqueUnlocked = Array.from(new Set(unlockedModules)).filter((id) =>
     Boolean(report.modules[id]),
   );
+  const availableModules = getAvailableModulesForMode(report.mode);
+  const lockedModules = availableModules.filter((m) => !uniqueUnlocked.includes(m.id));
+  const isFullBundle = lockedModules.length === 0;
 
   const safeName = escapeHtml(report.person1.name);
   const safeCoreTitle = escapeHtml(report.freeCoreVectorTitle);
@@ -126,19 +134,113 @@ export function buildFullReportEmailPayload(params: {
     })
     .join('\n');
 
+  // Full bundle buyers get full action plans for all 12 months; partial buyers get their 2 highlight months (peak + risk) and teasers for the rest
+  const peakMonthIdx = report.monthlyTimeline.reduce(
+    (best, curr) => (curr.energy > best.energy ? curr : best),
+    report.monthlyTimeline[0],
+  )?.monthIndex;
+  const riskMonthIdx = report.monthlyTimeline.reduce(
+    (worst, curr) => (curr.risk > worst.risk ? curr : worst),
+    report.monthlyTimeline[0],
+  )?.monthIndex;
+
   const monthsHtml = report.monthlyTimeline
-    .map(
-      (m) => `
+    .map((m) => {
+      const showFullAction =
+        isFullBundle || m.monthIndex === peakMonthIdx || m.monthIndex === riskMonthIdx;
+      const detailHtml = showFullAction
+        ? escapeHtml(m.actionNote)
+        : '<span style="color:#6E6B63;">Szczegółowy plan decyzji na ten miesiąc w pełnym pakiecie Solaris 2027.</span>';
+      return `
       <tr>
         <td style="padding:10px 12px;border-bottom:1px solid #E5E1D6;font-weight:600;color:#111114;white-space:nowrap;">${escapeHtml(m.monthFull)}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #E5E1D6;font-family:monospace;font-size:12px;color:#3E3C37;white-space:nowrap;">Energia ${m.energy}% · Ryzyko ${m.risk}%</td>
         <td style="padding:10px 12px;border-bottom:1px solid #E5E1D6;font-size:13px;line-height:1.5;color:#2B2A26;">
-          <strong>${escapeHtml(m.headline)}</strong><br/>${escapeHtml(m.actionNote)}
+          <strong>${escapeHtml(m.headline)}</strong><br/>${detailHtml}
         </td>
       </tr>
-    `,
-    )
+    `;
+    })
     .join('\n');
+
+  // Segment-specific conversion block:
+  // 1) Partial buyer -> show locked module teasers + 19,99 zł upgrade CTA
+  // 2) Full Solo buyer -> Pair mode cross-sell CTA (?tryb=para)
+  let conversionBlockHtml = '';
+  let conversionBlockText = '';
+
+  if (!isFullBundle) {
+    const lockedItemsHtml = lockedModules
+      .map((m) => {
+        const mod = report.modules[m.id];
+        return `
+          <li style="margin:0 0 10px;padding:12px 14px;border-radius:12px;background:#1A1A20;border:1px solid #2A2A33;">
+            <p style="margin:0;font-family:monospace;font-size:11px;color:#FF8566;">
+              ZABLOKOWANE · ${escapeHtml(m.shortTitle)} (${mod.scoreOutOf10}/10)
+            </p>
+            <p style="margin:4px 0 0;font-size:14px;font-weight:600;color:#FFFFFF;">
+              ${escapeHtml(mod.teaserTitle)}
+            </p>
+          </li>
+        `;
+      })
+      .join('');
+
+    const calendarExtraLine = !calendarUnlocked
+      ? '<p style="margin:0 0 14px;font-size:13px;line-height:1.55;color:#D8B4FE;">+ W pełnym rozszerzeniu dostajesz także gotowy plik <strong>Kalendarz .ics (12 okien)</strong> do Apple / Google Calendar oraz wersję PDF A4.</p>'
+      : '';
+
+    conversionBlockHtml = `
+      <div style="margin:0 0 22px;padding:24px;border-radius:20px;background:#111114;color:#FFFFFF;border:2px solid #FF5C35;">
+        <p style="margin:0;font-family:monospace;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#FF8566;">
+          POZOSTAŁE ZABLOKOWANE OBSZARY (${lockedModules.length})
+        </p>
+        <h2 style="margin:8px 0 10px;font-size:20px;line-height:1.25;color:#FFFFFF;">
+          Masz już dostęp do ${uniqueUnlocked.length === 1 ? '1 sfery' : `${uniqueUnlocked.length} sfer`}. Zobacz, czego jeszcze nie widzisz w 2027:
+        </h2>
+        <ul style="margin:0 0 14px;padding:0;list-style:none;">
+          ${lockedItemsHtml}
+        </ul>
+        ${calendarExtraLine}
+        <a href="${escapeHtml(confirmation.reportUrl)}" style="display:inline-block;padding:13px 24px;border-radius:999px;background:#FF5C35;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">
+          Odblokuj resztę raportu + .ics za 19,99 zł →
+        </a>
+        <p style="margin:10px 0 0;font-size:11px;color:#A1A1AA;">
+          Jednorazowa dopłata (zamiast kupować każdą sferę osobno). Po opłaceniu pełny raport otworzy się od razu i trafi na Twój e-mail.
+        </p>
+      </div>
+    `;
+
+    conversionBlockText = [
+      `ZABLOKOWANE OBSZARY TWOJEGO 2027 (${lockedModules.length}):`,
+      ...lockedModules.map((m) => `- ${m.shortTitle} (${report.modules[m.id].scoreOutOf10}/10): ${report.modules[m.id].teaserTitle}`),
+      `Dobierz pozostałe obszary + kalendarz .ics za 19,99 zł: ${confirmation.reportUrl}`,
+    ].join('\n');
+  } else if (report.mode === 'solo') {
+    const pairUrl = `${resolvedBaseUrl}/?tryb=para`;
+    conversionBlockHtml = `
+      <div style="margin:0 0 22px;padding:24px;border-radius:20px;background:#D6D1C4;color:#111114;">
+        <p style="margin:0;font-family:monospace;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:#8C321A;">
+          TRYB DLA DWOJGA · ZGODNOŚĆ 2027
+        </p>
+        <h2 style="margin:8px 0 10px;font-size:20px;line-height:1.25;color:#111114;">
+          Znasz już swój 2027. Sprawdź, czy Ty i bliska osoba idziecie w tym samym rytmie
+        </h2>
+        <p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#383631;">
+          Dlaczego w 2027 roku w niektórych relacjach pojawi się kryzys, a inne wejdą na nowy poziom? Zestaw daty urodzenia (para, przyjaciel lub wspólnik) i odbierz bezpłatny indeks zgodności w 2 minuty.
+        </p>
+        <a href="${escapeHtml(pairUrl)}" style="display:inline-block;padding:13px 24px;border-radius:999px;background:#111114;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">
+          Sprawdź matrycę Dla dwojga (0 zł na start) →
+        </a>
+      </div>
+    `;
+
+    conversionBlockText = [
+      'TRYB DLA DWOJGA — ZGODNOŚĆ 2027:',
+      'Znasz już swój 2027. Sprawdź bezpłatny wynik zgodności z partnerem, przyjacielem lub wspólnikiem w 2 minuty:',
+      pairUrl,
+    ].join('\n');
+  }
 
   const pairHtml =
     report.mode === 'pair' && report.person2 && report.compatibilityScore !== null
@@ -217,12 +319,14 @@ export function buildFullReportEmailPayload(params: {
 
     ${modulesHtml}
 
+    ${conversionBlockHtml}
+
     <div style="margin:0 0 22px;padding:20px;border-radius:16px;background:#FFFFFF;border:1px solid #E5E1D6;">
       <p style="margin:0;font-family:monospace;font-size:11px;text-transform:uppercase;color:#57544D;">
         Oś 12 miesięcy 2027
       </p>
       <h2 style="margin:6px 0 14px;font-size:19px;color:#111114;">
-        Twój harmonogram Styczeń – Grudzień 2027
+        ${isFullBundle ? 'Twój pełny harmonogram Styczeń – Grudzień 2027' : 'Skrót osi 12 miesięcy 2027 (szczyt i miesiąc ryzyka)'}
       </h2>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
         ${monthsHtml}
@@ -271,14 +375,18 @@ export function buildFullReportEmailPayload(params: {
     .join('\n\n');
 
   const monthsText = report.monthlyTimeline
-    .map(
-      (m) =>
-        `- ${m.monthFull} (Energia ${m.energy}% / Ryzyko ${m.risk}%): ${m.headline} — ${m.actionNote}`,
-    )
+    .map((m) => {
+      const showFullAction =
+        isFullBundle || m.monthIndex === peakMonthIdx || m.monthIndex === riskMonthIdx;
+      const note = showFullAction
+        ? m.actionNote
+        : 'Szczegółowy plan decyzji w pełnym pakiecie Solaris 2027.';
+      return `- ${m.monthFull} (Energia ${m.energy}% / Ryzyko ${m.risk}%): ${m.headline} — ${note}`;
+    })
     .join('\n');
 
   const text = [
-    `SOLARIS 2027 — TWÓJ PEŁNY RAPORT (${confirmation.orderId})`,
+    `SOLARIS 2027 — TWÓJ RAPORT (${confirmation.orderId})`,
     '',
     report.freeCoreVectorTitle,
     report.freeCoreVectorBody,
@@ -290,6 +398,7 @@ export function buildFullReportEmailPayload(params: {
     report.freeOpenInsightBody,
     '',
     modulesText,
+    ...(conversionBlockText ? ['', conversionBlockText] : []),
     '',
     'OŚ 12 MIESIĘCY 2027:',
     monthsText,
@@ -317,8 +426,37 @@ export function buildFullReportEmailPayload(params: {
 
 export function buildFollowUpReminderEmailPayload(params: {
   baseUrl: string;
+  personName?: string;
+  peakMonthPl?: string;
+  riskMonthPl?: string;
+  reportUrl?: string;
 }): EmailPayload {
-  const safeBaseUrl = escapeHtml(params.baseUrl);
+  const targetUrl = params.reportUrl || params.baseUrl;
+  const safeTargetUrl = escapeHtml(targetUrl);
+  const safePersonName = params.personName?.trim() ? escapeHtml(params.personName.trim()) : '';
+  const safePeak = params.peakMonthPl?.trim() ? escapeHtml(params.peakMonthPl.trim()) : '';
+  const safeRisk = params.riskMonthPl?.trim() ? escapeHtml(params.riskMonthPl.trim()) : '';
+  const hasPersonalizedHook = Boolean(safeRisk);
+
+  const headline = hasPersonalizedHook
+    ? `${safePersonName ? `${safePersonName}, ` : ''}Twój miesiąc napięć w 2027 to ${safeRisk} — sprawdź plan z rabatem -20%`
+    : 'Twój rabat -20% na Pełny Raport Solaris 2027 jest gotowy';
+
+  const personalizedBoxHtml = hasPersonalizedHook
+    ? `
+      <div style="margin:0 0 18px;padding:14px 16px;border-radius:14px;background:#1A1A20;border:1px solid #2A2A33;">
+        ${
+          safePeak
+            ? `<p style="margin:0 0 6px;font-size:13px;color:#4ADE80;"><strong>Okno wzrostu 2027:</strong> ${safePeak}</p>`
+            : ''
+        }
+        <p style="margin:0;font-size:13px;color:#FF8566;">
+          <strong>Miesiąc podwyższonego tarcia:</strong> ${safeRisk} — w pełnym raporcie masz dokładne daty, czego nie podpisywać w ciemno oraz 3 kroki na 2027.
+        </p>
+      </div>
+    `
+    : '';
+
   const html = `<!doctype html>
 <html lang="pl">
 <head><meta charset="UTF-8" /></head>
@@ -328,14 +466,15 @@ export function buildFollowUpReminderEmailPayload(params: {
       <p style="margin:0;font-family:monospace;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#FF7B5A;">
         SOLARIS 2027 · RABAT POWROTNY -20%
       </p>
-      <h1 style="margin:10px 0 10px;font-size:23px;line-height:1.25;color:#FFFFFF;">
-        Twój rabat -20% na Pełny Raport Solaris 2027 jest gotowy
+      <h1 style="margin:10px 0 12px;font-size:23px;line-height:1.25;color:#FFFFFF;">
+        ${headline}
       </h1>
+      ${personalizedBoxHtml}
       <p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:#D4D4DC;">
-        Zapisaliśmy Twój adres. Gdy będziesz gotowy/a wrócić po pełną mapę 2027 roku (wszystkie sfery + kalendarz .ics + wersja PDF A4), pełny pakiet kosztuje <strong>35,99 zł</strong> zamiast 44,99 zł.
+        Zapisaliśmy Twój skrót. Gdy wrócisz po pełny raport 2027 (wszystkie sfery + kalendarz .ics do telefonu + PDF A4), pełny pakiet kosztuje <strong>35,99 zł</strong> zamiast 44,99 zł. Możesz też zacząć od 1 wybranej sfery za 14,99 zł.
       </p>
-      <a href="${safeBaseUrl}" style="display:inline-block;padding:12px 24px;border-radius:999px;background:#FF5C35;color:#FFFFFF;text-decoration:none;font-weight:600;font-size:14px;">
-        Wróć do Solaris 2027 →
+      <a href="${safeTargetUrl}" style="display:inline-block;padding:13px 24px;border-radius:999px;background:#FF5C35;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;">
+        Wróć do raportu z rabatem -20% →
       </a>
     </div>
     <p style="margin:16px 0 0;font-size:11px;line-height:1.6;color:#57544D;">
@@ -346,16 +485,22 @@ export function buildFollowUpReminderEmailPayload(params: {
 </html>`;
 
   const text = [
-    'SOLARIS 2027 — Twój rabat powrotny -20%',
+    hasPersonalizedHook
+      ? `SOLARIS 2027 — Twój miesiąc napięć (${params.riskMonthPl}) + rabat -20%`
+      : 'SOLARIS 2027 — Twój rabat powrotny -20%',
     '',
-    'Zapisaliśmy Twój adres. Pełny Raport Solaris 2027 (wszystkie obszary + kalendarz .ics + PDF A4) z rabatem -20% kosztuje 35,99 zł zamiast 44,99 zł.',
-    `Wróć do serwisu: ${params.baseUrl}`,
+    ...(params.peakMonthPl ? [`Okno wzrostu 2027: ${params.peakMonthPl}`] : []),
+    ...(params.riskMonthPl ? [`Miesiąc podwyższonego tarcia: ${params.riskMonthPl}`] : []),
+    'Pełny Raport Solaris 2027 (wszystkie obszary + kalendarz .ics + PDF A4) z rabatem -20% kosztuje 35,99 zł zamiast 44,99 zł.',
+    `Wróć do raportu: ${targetUrl}`,
     '',
     `Zgodę na wiadomości e-mail możesz wycofać w każdej chwili: ${SELLER_LEGAL_CONFIG.contactEmail}`,
   ].join('\n');
 
   return {
-    subject: 'Solaris 2027 — Twój rabat powrotny -20% na pełny raport',
+    subject: hasPersonalizedHook
+      ? `Solaris 2027 — Twój miesiąc napięć (${params.riskMonthPl}) + rabat -20%`
+      : 'Solaris 2027 — Twój rabat powrotny -20% na pełny raport',
     html,
     text,
   };

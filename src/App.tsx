@@ -82,8 +82,23 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlSessionId = params.get('raport')?.trim();
+    const urlTryb = params.get('tryb')?.trim();
     const checkoutStatus = params.get('checkout')?.trim();
     const stripeSessionId = params.get('stripe_session_id')?.trim();
+
+    if (!urlSessionId && urlTryb === 'para') {
+      setSelectedMode('pair');
+      setView('funnel');
+      try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('tryb');
+        window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}`);
+      } catch {
+        // ignore history errors
+      }
+      return;
+    }
+
     const targetSessionId = urlSessionId || persisted?.report.sessionId;
     if (!targetSessionId) return;
 
@@ -371,6 +386,9 @@ export default function App() {
           email,
           marketingConsent,
           sessionId: persisted?.report.sessionId ?? 'landing-visitor',
+          personName: persisted?.report.person1.name,
+          peakMonthPl: persisted?.report.peakMonthPl,
+          riskMonthPl: persisted?.report.riskMonthPl,
         }),
       });
       const json = (await response.json()) as { ok?: boolean; message?: string; error?: string };

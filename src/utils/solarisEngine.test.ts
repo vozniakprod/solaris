@@ -462,12 +462,39 @@ test('emailDelivery escapes HTML, includes only unlocked modules, attaches .ics 
     unlockedModules: ['finanse'],
     calendarUnlocked: false,
     confirmation,
+    baseUrl: 'https://solaris27.pl',
   });
   assert.equal(withoutCalendar.attachments, undefined);
+  // Partial buyer sees locked module teasers + 19,99 zł upsell CTA (and never locked deepDive!)
+  assert.ok(withoutCalendar.html.includes('19,99 zł'));
+  assert.ok(withoutCalendar.html.includes(report.modules.relacje.teaserTitle));
+  assert.ok(!withoutCalendar.html.includes(report.modules.relacje.deepDive));
+  assert.ok(withoutCalendar.html.includes('Szczegółowy plan decyzji na ten miesiąc w pełnym pakiecie'));
 
-  const followUp = buildFollowUpReminderEmailPayload({ baseUrl: 'https://solaris2027.pl' });
+  // Full Solo buyer gets all 12 months + Pair cross-sell CTA (?tryb=para), NO 19,99 zł upsell
+  const fullSolo = buildFullReportEmailPayload({
+    report,
+    unlockedModules: ['finanse', 'relacje', 'energia', 'zmiany'],
+    calendarUnlocked: true,
+    confirmation,
+    baseUrl: 'https://solaris27.pl',
+  });
+  assert.ok(fullSolo.html.includes('https://solaris27.pl/?tryb=para'));
+  assert.ok(!fullSolo.html.includes('19,99 zł'));
+  assert.ok(!fullSolo.html.includes('Szczegółowy plan decyzji na ten miesiąc w pełnym pakiecie'));
+
+  const followUp = buildFollowUpReminderEmailPayload({
+    baseUrl: 'https://solaris27.pl',
+    personName: 'Kasia <b>test</b>',
+    peakMonthPl: 'Maj 2027',
+    riskMonthPl: 'Październik 2027',
+    reportUrl: 'https://solaris27.pl/?raport=email-test-1',
+  });
+  assert.ok(followUp.subject.includes('Październik 2027'));
   assert.ok(followUp.subject.includes('-20%'));
   assert.ok(followUp.html.includes('35,99 zł'));
+  assert.ok(followUp.html.includes('Maj 2027'));
+  assert.ok(!followUp.html.includes('<b>test</b>'));
 
   const unconfiguredRes = await sendEmailViaResend({
     apiKey: '',

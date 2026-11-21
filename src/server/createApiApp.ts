@@ -314,6 +314,7 @@ async function deliverPaidReportEmail(params: {
     unlockedModules: unlockState.unlockedModules,
     calendarUnlocked: unlockState.calendarUnlocked,
     confirmation,
+    baseUrl,
   });
 
   const sendResult = await sendEmailViaResend({
@@ -1279,7 +1280,30 @@ export function createApiApp(options?: { fallbackPort?: number }): Express {
     let emailSent = false;
     if (isResendConfigured(process.env.RESEND_API_KEY)) {
       const baseUrl = resolveSafeBaseUrl(req, fallbackPort);
-      const reminderPayload = buildFollowUpReminderEmailPayload({ baseUrl });
+      const stored = sessionId && sessionId !== 'guest' && sessionId !== 'landing-visitor'
+        ? sessionStore.get(sessionId)
+        : undefined;
+      const personName =
+        stored?.report.person1.name ||
+        (typeof body.personName === 'string' ? body.personName.trim().slice(0, 60) : '');
+      const peakMonthPl =
+        stored?.report.peakMonthPl ||
+        (typeof body.peakMonthPl === 'string' ? body.peakMonthPl.trim().slice(0, 40) : '');
+      const riskMonthPl =
+        stored?.report.riskMonthPl ||
+        (typeof body.riskMonthPl === 'string' ? body.riskMonthPl.trim().slice(0, 40) : '');
+      const reportUrl =
+        sessionId && sessionId !== 'guest' && sessionId !== 'landing-visitor'
+          ? `${baseUrl}/?raport=${encodeURIComponent(sessionId)}`
+          : baseUrl;
+
+      const reminderPayload = buildFollowUpReminderEmailPayload({
+        baseUrl,
+        personName: personName || undefined,
+        peakMonthPl: peakMonthPl || undefined,
+        riskMonthPl: riskMonthPl || undefined,
+        reportUrl,
+      });
       const sent = await sendEmailViaResend({
         apiKey: process.env.RESEND_API_KEY,
         from: process.env.EMAIL_FROM,
