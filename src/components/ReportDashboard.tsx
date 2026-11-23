@@ -670,6 +670,52 @@ export function ReportDashboard({
     return report.calendarEvents.filter((ev) => ev.type === calendarFilter);
   }, [report.calendarEvents, calendarFilter]);
 
+  const checkoutSectionElement = !allUnlocked ? (
+    <ReportCheckoutSection
+      report={report}
+      availableModules={availableModules}
+      lockedModules={lockedModules}
+      selectedModules={selectedModules}
+      pricing={pricing}
+      includeCalendarBump={includeCalendarBump}
+      hasRetentionDiscount={hasRetentionDiscount}
+      useDownsellOffer={useDownsellOffer}
+      downsellSecondsLeft={downsellSecondsLeft}
+      termsAndAgeAccepted={termsAndAgeAccepted}
+      waiverAccepted={waiverAccepted}
+      secondPersonConsentAccepted={secondPersonConsentAccepted}
+      marketingConsent={marketingConsent}
+      checkoutEmail={checkoutEmail}
+      checkoutError={checkoutError}
+      isPaying={isPaying}
+      onChangeCheckoutEmail={(val) => {
+        setCheckoutEmail(val);
+        if (checkoutError) setCheckoutError(null);
+      }}
+      onSelectFullBundle={selectFullBundle}
+      onSelectSingleMode={selectSingleMode}
+      onToggleModule={toggleModule}
+      onFocusModuleFromPreview={focusModuleInPaywall}
+      onToggleCalendarBump={setIncludeCalendarBump}
+      onToggleTermsAndAge={(checked) => {
+        setTermsAndAgeAccepted(checked);
+        if (checkoutError) setCheckoutError(null);
+      }}
+      onToggleWaiver={(checked) => {
+        setWaiverAccepted(checked);
+        if (checkoutError) setCheckoutError(null);
+      }}
+      onToggleSecondPerson={(checked) => {
+        setSecondPersonConsentAccepted(checked);
+        if (checkoutError) setCheckoutError(null);
+      }}
+      onToggleMarketing={setMarketingConsent}
+      onCheckout={handleCheckout}
+      onOpenLegal={onOpenLegal}
+      onOpenExitRescue={() => setShowExitRescueModal(true)}
+    />
+  ) : null;
+
   return (
     <main className="mx-auto w-full max-w-[1080px] px-4 pb-24 pt-6 sm:px-6 sm:pt-9">
       {/* Stripe Return Status Notice (verified / cancelled / verifying) */}
@@ -1003,6 +1049,19 @@ export function ReportDashboard({
         </dl>
       </section>
 
+      {/* FOR UNPAID USERS: SIMPLE CHECKOUT RIGHT UNDER THE RESULT (NO SCROLLING HALF THE SITE!) */}
+      {!hasAnyPurchase && checkoutSectionElement}
+
+      {!hasAnyPurchase && (
+        <div className="mt-8 mb-2 flex items-center gap-3">
+          <div className="h-px flex-1 bg-zinc-200" />
+          <p className="font-mono text-[11px] font-medium uppercase tracking-[0.06em] text-zinc-500">
+            Bezpłatny podgląd Twojego 2027
+          </p>
+          <div className="h-px flex-1 bg-zinc-200" />
+        </div>
+      )}
+
       {/* 4-CARD PERSONALIZED VISUAL DASHBOARD WITH REAL USER DATA */}
       <ReportVisualBento
         report={report}
@@ -1190,7 +1249,7 @@ export function ReportDashboard({
               <p className="text-xs leading-relaxed text-zinc-600">
                 Szczegółowa checklista decyzji oraz dokładne dni podwyższonego ryzyka dla{' '}
                 <strong className="text-[#111114]">{activeMonth.monthFull}</strong> otwierają się po
-                odblokowaniu wybranego modułu poniżej.
+                odblokowaniu raportu.
               </p>
               <button
                 type="button"
@@ -1382,52 +1441,8 @@ export function ReportDashboard({
         </section>
       )}
 
-      {/* MINIMALIST PAYWALL & CHECKOUT */}
-      {!allUnlocked && (
-        <ReportCheckoutSection
-          report={report}
-          availableModules={availableModules}
-          lockedModules={lockedModules}
-          selectedModules={selectedModules}
-          pricing={pricing}
-          includeCalendarBump={includeCalendarBump}
-          hasRetentionDiscount={hasRetentionDiscount}
-          useDownsellOffer={useDownsellOffer}
-          downsellSecondsLeft={downsellSecondsLeft}
-          termsAndAgeAccepted={termsAndAgeAccepted}
-          waiverAccepted={waiverAccepted}
-          secondPersonConsentAccepted={secondPersonConsentAccepted}
-          marketingConsent={marketingConsent}
-          checkoutEmail={checkoutEmail}
-          checkoutError={checkoutError}
-          isPaying={isPaying}
-          onChangeCheckoutEmail={(val) => {
-            setCheckoutEmail(val);
-            if (checkoutError) setCheckoutError(null);
-          }}
-          onSelectFullBundle={selectFullBundle}
-          onSelectSingleMode={selectSingleMode}
-          onToggleModule={toggleModule}
-          onFocusModuleFromPreview={focusModuleInPaywall}
-          onToggleCalendarBump={setIncludeCalendarBump}
-          onToggleTermsAndAge={(checked) => {
-            setTermsAndAgeAccepted(checked);
-            if (checkoutError) setCheckoutError(null);
-          }}
-          onToggleWaiver={(checked) => {
-            setWaiverAccepted(checked);
-            if (checkoutError) setCheckoutError(null);
-          }}
-          onToggleSecondPerson={(checked) => {
-            setSecondPersonConsentAccepted(checked);
-            if (checkoutError) setCheckoutError(null);
-          }}
-          onToggleMarketing={setMarketingConsent}
-          onCheckout={handleCheckout}
-          onOpenLegal={onOpenLegal}
-          onOpenExitRescue={() => setShowExitRescueModal(true)}
-        />
-      )}
+      {/* FOR PARTIAL BUYERS: CHECKOUT FOR REMAINING MODULES AT BOTTOM */}
+      {hasAnyPurchase && !allUnlocked && checkoutSectionElement}
 
       {/* Report Bottom Disclaimer + Quiet Footer Action */}
       <footer className="mt-8 space-y-4 border-t border-zinc-200 pt-6 text-center">

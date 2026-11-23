@@ -302,17 +302,49 @@ test('Stripe server helpers validate keys, session IDs, Checkout params, and HMA
   assert.equal(verifyStripeWebhookSignature(body, `t=${now},v1=${sigHex}`, secret, now + 600), false);
 });
 
-test('OpenAI editorial engine enforces Polish safety rules, omits houses on unknown birth time, and falls back safely without key', async () => {
+test('OpenAI editorial engine enforces Polish safety rules, omits houses on unknown birth time, supports modern models, and falls back safely without key', async () => {
   const {
+    buildOpenAIChatRequestBody,
     buildOpenAITeaserPrompt,
     buildOpenAIUnlockedModulesPrompt,
     enrichTeaserWithOpenAI,
     isOpenAIConfigured,
+    isReasoningOrGpt5Model,
+    parseJsonObjectFromLlmContent,
     SOLARIS_EDITORIAL_SYSTEM_PROMPT,
   } = await import('./openaiEditorial');
 
   assert.equal(isOpenAIConfigured(''), false);
   assert.equal(isOpenAIConfigured('sk-proj-example1234567890'), true);
+  assert.equal(isReasoningOrGpt5Model('gpt-4o-mini'), false);
+  assert.equal(isReasoningOrGpt5Model('gpt-5-mini'), true);
+  assert.equal(isReasoningOrGpt5Model('o3-mini'), true);
+
+  const gpt4Body = buildOpenAIChatRequestBody({
+    model: 'gpt-4o-mini',
+    systemPrompt: 'sys',
+    userPrompt: 'usr',
+    maxTokens: 900,
+  });
+  assert.equal(gpt4Body.max_completion_tokens, 900);
+  assert.equal(gpt4Body.temperature, 0.65);
+  assert.equal('max_tokens' in gpt4Body, false);
+
+  const gpt5Body = buildOpenAIChatRequestBody({
+    model: 'gpt-5-mini',
+    systemPrompt: 'sys',
+    userPrompt: 'usr',
+    maxTokens: 900,
+  });
+  assert.equal('temperature' in gpt5Body, false);
+  assert.equal(gpt5Body.reasoning_effort, 'low');
+  assert.ok(Number(gpt5Body.max_completion_tokens) >= 2200);
+
+  assert.deepEqual(
+    parseJsonObjectFromLlmContent('```json\n{"freeCoreVectorTitle":"Test"}\n```'),
+    { freeCoreVectorTitle: 'Test' },
+  );
+
   assert.ok(SOLARIS_EDITORIAL_SYSTEM_PROMPT.includes('Nigdy nie udzielaj porad medycznych'));
   assert.ok(SOLARIS_EDITORIAL_SYSTEM_PROMPT.includes('ascendencie'));
 

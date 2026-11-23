@@ -42,6 +42,23 @@
   );
 }
 
+@keyframes solarisDotPulse {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0) scale(0.75);
+    opacity: 0.35;
+  }
+  40% {
+    transform: translateY(-5px) scale(1.1);
+    opacity: 1;
+  }
+}
+
+.solaris-dot {
+  animation: solarisDotPulse 1.15s ease-in-out infinite;
+}
+
 @media print {
   @page {
     size: A4 portrait;

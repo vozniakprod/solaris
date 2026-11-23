@@ -78,6 +78,7 @@ export default function App() {
   const [heroQuickStart, setHeroQuickStart] = useState<HeroQuickStartPayload | null>(null);
   const [pendingPayload, setPendingPayload] = useState<PendingPayload | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
+  const [calcReady, setCalcReady] = useState(false);
   const [legalDoc, setLegalDoc] = useState<LegalDocId | null>(null);
   const [cookieSettingsOpen, setCookieSettingsOpen] = useState(false);
   const [paymentNotice, setPaymentNotice] = useState<{
@@ -323,11 +324,12 @@ export default function App() {
   const runTeaserCalculation = async (payload: PendingPayload) => {
     setPendingPayload(payload);
     setCalcError(null);
+    setCalcReady(false);
     setView('calculating');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 20000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 28000);
 
     try {
       const [response] = await Promise.all([
@@ -337,7 +339,7 @@ export default function App() {
           body: JSON.stringify(payload),
           signal: controller.signal,
         }),
-        new Promise((resolve) => window.setTimeout(resolve, 1100)),
+        new Promise((resolve) => window.setTimeout(resolve, 1400)),
       ]);
 
       window.clearTimeout(timeoutId);
@@ -391,6 +393,8 @@ export default function App() {
             : 'Solaris 2027 — Raport Solo',
         value: json.report.mode === 'pair' ? 49.99 : 29.99,
       });
+      setCalcReady(true);
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
       setView('report');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -521,6 +525,7 @@ export default function App() {
         <CalculatingScreen
           personName={pendingPayload?.person1.name || 'Ty'}
           isPair={pendingPayload?.mode === 'pair'}
+          isReady={calcReady}
           error={calcError}
           onRetry={() => {
             if (pendingPayload) runTeaserCalculation(pendingPayload);

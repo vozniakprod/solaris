@@ -4,6 +4,15 @@ import type { ReportModuleId } from './solarisPricing';
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 
+export interface OpenAICallDiagnostics {
+  ok: boolean;
+  model: string;
+  latencyMs: number;
+  status: number | null;
+  errorType: string | null;
+  errorMessage: string | null;
+}
+
 export function normalizeEnvSecret(raw: string | undefined): string {
   const trimmed = (raw ?? '').trim();
   if (
@@ -18,6 +27,75 @@ export function normalizeEnvSecret(raw: string | undefined): string {
 export function isOpenAIConfigured(apiKey: string | undefined): boolean {
   const cleaned = normalizeEnvSecret(apiKey);
   return cleaned.length > 10 && cleaned !== 'MY_OPENAI_API_KEY';
+}
+
+export function isReasoningOrGpt5Model(model: string): boolean {
+  return /^(o[1-9]($|-)|gpt-5($|-))/i.test(model.trim());
+}
+
+export function buildOpenAIChatRequestBody(params: {
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  maxTokens: number;
+}): Record<string, unknown> {
+  const model = params.model.trim() || DEFAULT_OPENAI_MODEL;
+  const reasoningModel = isReasoningOrGpt5Model(model);
+
+  const body: Record<string, unknown> = {
+    model,
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: params.systemPrompt },
+      { role: 'user', content: params.userPrompt },
+    ],
+  };
+
+  if (reasoningModel) {
+    // Reasoning / GPT-5 models reject custom temperature and count reasoning tokens inside max_completion_tokens
+    body.max_completion_tokens = Math.max(params.maxTokens * 2, 2200);
+    body.reasoning_effort = 'low';
+  } else {
+    body.temperature = 0.65;
+    body.max_completion_tokens = params.maxTokens;
+  }
+
+  return body;
+}
+
+export function parseJsonObjectFromLlmContent(raw: string): Record<string, unknown> | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Strip optional markdown code fences ```json ... ```
+  const unfenced = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    const direct = JSON.parse(unfenced);
+    if (direct && typeof direct === 'object' && !Array.isArray(direct)) {
+      return direct as Record<string, unknown>;
+    }
+  } catch {
+    // Fallback: extract outermost JSON object substring
+  }
+
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      const sliced = JSON.parse(unfenced.slice(start, end + 1));
+      if (sliced && typeof sliced === 'object' && !Array.isArray(sliced)) {
+        return sliced as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 export const SOLARIS_EDITORIAL_SYSTEM_PROMPT = [
@@ -84,6 +162,113 @@ export function buildOpenAIUnlockedModulesPrompt(
     .join('\n');
 }
 
+async function callOpenAIJsonSingleAttempt(
+  apiKey: string,
+  model: string,
+  userPrompt: string,
+  maxTokens: number,
+  timeoutMs: number,
+  systemPrompt = SOLARIS_EDITORIAL_SYSTEM_PROMPT,
+): Promise<{ data: Record<string, unknown> | null; diag: OpenAICallDiagnostics }> {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const requestBody = buildOpenAIChatRequestBody({
+      model,
+      systemPrompt,
+      userPrompt,
+      maxTokens,
+    });
+
+    const res = await fetch(OPENAI_CHAT_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    const latencyMs = Date.now() - startedAt;
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      let errorType: string | null = null;
+      let errorMessage: string | null = errText.slice(0, 220) || `HTTP ${res.status}`;
+      try {
+        const parsedErr = JSON.parse(errText) as {
+          error?: { type?: string; code?: string; message?: string };
+        };
+        errorType = parsedErr.error?.code || parsedErr.error?.type || null;
+        errorMessage = parsedErr.error?.message?.slice(0, 220) || errorMessage;
+      } catch {
+        // raw text fallback already set
+      }
+      console.warn(
+        `[OpenAI editorial error] model=${model} status=${res.status} latencyMs=${latencyMs} type=${errorType ?? 'unknown'} msg=${errorMessage}`,
+      );
+      return {
+        data: null,
+        diag: { ok: false, model, latencyMs, status: res.status, errorType, errorMessage },
+      };
+    }
+
+    const payload = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
+    };
+    const content = payload.choices?.[0]?.message?.content?.trim() ?? '';
+    const parsed = parseJsonObjectFromLlmContent(content);
+    if (!parsed) {
+      const finishReason = payload.choices?.[0]?.finish_reason ?? 'unknown';
+      console.warn(
+        `[OpenAI editorial parse error] model=${model} latencyMs=${latencyMs} finish_reason=${finishReason} len=${content.length}`,
+      );
+      return {
+        data: null,
+        diag: {
+          ok: false,
+          model,
+          latencyMs,
+          status: res.status,
+          errorType: 'invalid_json',
+          errorMessage: `Model returned non-JSON or empty output (finish_reason=${finishReason})`,
+        },
+      };
+    }
+
+    console.info(`[OpenAI editorial ok] model=${model} latencyMs=${latencyMs}`);
+    return {
+      data: parsed,
+      diag: { ok: true, model, latencyMs, status: res.status, errorType: null, errorMessage: null },
+    };
+  } catch (err) {
+    const latencyMs = Date.now() - startedAt;
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    const message = isAbort
+      ? `Timeout after ${timeoutMs}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+    console.warn(`[OpenAI editorial fallback] model=${model} latencyMs=${latencyMs} err=${message}`);
+    return {
+      data: null,
+      diag: {
+        ok: false,
+        model,
+        latencyMs,
+        status: null,
+        errorType: isAbort ? 'timeout' : 'network_error',
+        errorMessage: message.slice(0, 220),
+      },
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callOpenAIJson(
   apiKey: string,
   model: string,
@@ -91,47 +276,64 @@ async function callOpenAIJson(
   maxTokens: number,
   timeoutMs: number,
 ): Promise<Record<string, unknown> | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const first = await callOpenAIJsonSingleAttempt(apiKey, model, userPrompt, maxTokens, timeoutMs);
+  if (first.data) return first.data;
 
-  try {
-    const res = await fetch(OPENAI_CHAT_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.65,
-        max_tokens: maxTokens,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: SOLARIS_EDITORIAL_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      console.warn(`[OpenAI editorial error ${res.status}]:`, errBody.slice(0, 220));
-      return null;
-    }
-
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null } }>;
-    };
-    const content = data.choices?.[0]?.message?.content?.trim();
-    if (!content) return null;
-    return JSON.parse(content) as Record<string, unknown>;
-  } catch (err) {
-    console.warn('[OpenAI editorial fallback]:', err instanceof Error ? err.message : err);
-    return null;
-  } finally {
-    clearTimeout(timer);
+  // If a custom OPENAI_MODEL failed with 400/404 (bad model name or unsupported parameter), retry once on DEFAULT_OPENAI_MODEL
+  const shouldFallbackModel =
+    model !== DEFAULT_OPENAI_MODEL &&
+    (first.diag.status === 400 || first.diag.status === 404);
+  if (shouldFallbackModel) {
+    console.warn(`[OpenAI editorial] Retrying with fallback model ${DEFAULT_OPENAI_MODEL}`);
+    const retry = await callOpenAIJsonSingleAttempt(
+      apiKey,
+      DEFAULT_OPENAI_MODEL,
+      userPrompt,
+      maxTokens,
+      Math.min(timeoutMs, 12000),
+    );
+    return retry.data;
   }
+
+  return null;
+}
+
+export async function checkOpenAIConnection(
+  rawApiKey: string | undefined,
+  rawModel?: string,
+): Promise<OpenAICallDiagnostics & { configured: boolean; keyFormatOk: boolean }> {
+  const cleanedKey = normalizeEnvSecret(rawApiKey);
+  const configured = isOpenAIConfigured(rawApiKey);
+  const keyFormatOk = cleanedKey.startsWith('sk-') && cleanedKey.length >= 24;
+  const model = normalizeEnvSecret(rawModel) || DEFAULT_OPENAI_MODEL;
+
+  if (!configured) {
+    return {
+      configured: false,
+      keyFormatOk: false,
+      ok: false,
+      model,
+      latencyMs: 0,
+      status: null,
+      errorType: 'missing_api_key',
+      errorMessage: 'OPENAI_API_KEY is not configured in server environment variables.',
+    };
+  }
+
+  const res = await callOpenAIJsonSingleAttempt(
+    cleanedKey,
+    model,
+    'Zwróć JSON: {"pong": true}',
+    40,
+    10000,
+    'Return valid JSON only.',
+  );
+
+  return {
+    configured: true,
+    keyFormatOk,
+    ...res.diag,
+  };
 }
 
 function asNonEmptyString(val: unknown): string | null {
@@ -158,7 +360,7 @@ export async function enrichTeaserWithOpenAI(
 
   const apiKey = normalizeEnvSecret(rawApiKey);
   const model = normalizeEnvSecret(rawModel) || DEFAULT_OPENAI_MODEL;
-  const parsed = await callOpenAIJson(apiKey, model, buildOpenAITeaserPrompt(report), 850, 7500);
+  const parsed = await callOpenAIJson(apiKey, model, buildOpenAITeaserPrompt(report), 950, 15000);
   if (!parsed) return report;
 
   const nextModules = { ...report.modules };
@@ -208,8 +410,8 @@ export async function enrichUnlockedModulesWithOpenAI(
     apiKey,
     model,
     buildOpenAIUnlockedModulesPrompt(report, moduleIds),
-    1900,
-    12000,
+    2200,
+    24000,
   );
   if (!parsed || typeof parsed.modules !== 'object' || !parsed.modules) {
     return report;
@@ -217,6 +419,7 @@ export async function enrichUnlockedModulesWithOpenAI(
 
   const modMap = parsed.modules as Record<string, Record<string, unknown>>;
   const nextModules = { ...report.modules };
+  let updatedAny = false;
 
   for (const id of moduleIds) {
     const incoming = modMap[id];
@@ -228,6 +431,10 @@ export async function enrichUnlockedModulesWithOpenAI(
     const avoidList = asStringArray(incoming.avoidList, 2, 3);
     const checkpoint = asNonEmptyString(incoming.checkpoint);
 
+    if (summary || deepDive || keyActions || avoidList || checkpoint) {
+      updatedAny = true;
+    }
+
     nextModules[id] = {
       ...current,
       summary: summary ?? current.summary,
@@ -236,6 +443,10 @@ export async function enrichUnlockedModulesWithOpenAI(
       avoidList: avoidList ?? current.avoidList,
       checkpoint: checkpoint ?? current.checkpoint,
     };
+  }
+
+  if (!updatedAny) {
+    return report;
   }
 
   return {

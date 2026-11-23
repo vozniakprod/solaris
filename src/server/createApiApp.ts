@@ -43,8 +43,12 @@ import {
   verifyStripeWebhookSignature,
 } from '../utils/stripeServer.js';
 import {
+  checkOpenAIConnection,
+  DEFAULT_OPENAI_MODEL,
   enrichTeaserWithOpenAI,
   enrichUnlockedModulesWithOpenAI,
+  isOpenAIConfigured,
+  normalizeEnvSecret,
 } from '../utils/openaiEditorial.js';
 import {
   buildFollowUpReminderEmailPayload,
@@ -374,9 +378,11 @@ async function ensureUnlockedModulesEnriched(sessionId: string): Promise<void> {
     process.env.OPENAI_API_KEY,
     process.env.OPENAI_MODEL,
   );
-  stored.report = enriched;
-  for (const m of pending) {
-    stored.aiEnrichedModules.add(m);
+  if (enriched !== stored.report) {
+    stored.report = enriched;
+    for (const m of pending) {
+      stored.aiEnrichedModules.add(m);
+    }
   }
 }
 
@@ -578,14 +584,29 @@ export function createApiApp(options?: { fallbackPort?: number }): Express {
     res.json({ ok: true, service: 'solaris-2027' });
   });
 
-  // Safe non-secret Stripe & Email runtime availability for client
+  // Safe non-secret Stripe, Email & AI runtime availability for client
   app.get('/api/payments/config', (_req, res) => {
     const mode = getStripeRuntimeMode(process.env.STRIPE_SECRET_KEY);
     res.json({
       stripeEnabled: mode !== 'unconfigured',
       mode,
       emailConfigured: isResendConfigured(process.env.RESEND_API_KEY),
+      aiConfigured: isOpenAIConfigured(process.env.OPENAI_API_KEY),
+      aiModel: normalizeEnvSecret(process.env.OPENAI_MODEL) || DEFAULT_OPENAI_MODEL,
     });
+  });
+
+  // Safe non-secret live OpenAI connectivity check (rate-limited, never exposes keys)
+  app.get('/api/ai/check', async (req, res) => {
+    const ip = getClientIp(req);
+    if (!checkRateLimit(`ai-check:${ip}`, 8, 15 * 60 * 1000)) {
+      return res.status(429).json({ ok: false, errorType: 'rate_limited' });
+    }
+    const result = await checkOpenAIConnection(
+      process.env.OPENAI_API_KEY,
+      process.env.OPENAI_MODEL,
+    );
+    return res.status(result.ok ? 200 : 503).json(result);
   });
 
   // Server-side verification of a completed Stripe Checkout Session (never trusts ?paid=1)
