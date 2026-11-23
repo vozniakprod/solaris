@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Header, type AppView, type NavSectionId } from './components/Header';
-import { Hero } from './components/Hero';
+import { Hero, type HeroQuickStartPayload } from './components/Hero';
 import { LandingSections } from './components/LandingSections';
 import { FORM_DRAFT_STORAGE_KEY, QuizFunnel } from './components/QuizFunnel';
 import { CalculatingScreen } from './components/CalculatingScreen';
@@ -75,6 +75,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('landing');
   const [activeNav, setActiveNav] = useState<NavSectionId>('start');
   const [selectedMode, setSelectedMode] = useState<FunnelMode>('solo');
+  const [heroQuickStart, setHeroQuickStart] = useState<HeroQuickStartPayload | null>(null);
   const [pendingPayload, setPendingPayload] = useState<PendingPayload | null>(null);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [legalDoc, setLegalDoc] = useState<LegalDocId | null>(null);
@@ -306,7 +307,15 @@ export default function App() {
   };
 
   const handleStartFunnel = (mode?: FunnelMode) => {
+    setHeroQuickStart(null);
     setSelectedMode(mode ?? 'solo');
+    setView('funnel');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleQuickStartFromHero = (payload: HeroQuickStartPayload) => {
+    setSelectedMode(payload.mode);
+    setHeroQuickStart(payload);
     setView('funnel');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -461,7 +470,7 @@ export default function App() {
       : null;
 
   return (
-    <div className="min-h-screen bg-[#0B0B0D] text-white">
+    <div className="min-h-screen bg-[#FAFAFA] text-[#111114]">
       <Header
         view={view}
         activeNav={activeNav}
@@ -481,6 +490,7 @@ export default function App() {
         <main>
           <Hero
             onStartFunnel={handleStartFunnel}
+            onQuickStart={handleQuickStartFromHero}
             returningBanner={returningBanner}
           />
           <LandingSections
@@ -495,7 +505,13 @@ export default function App() {
       {view === 'funnel' && (
         <QuizFunnel
           initialMode={selectedMode}
-          onCancel={() => setView('landing')}
+          initialBirthDate={heroQuickStart?.birthDate}
+          initialPartnerBirthDate={heroQuickStart?.partnerBirthDate}
+          skipModeStep={Boolean(heroQuickStart)}
+          onCancel={() => {
+            setHeroQuickStart(null);
+            setView('landing');
+          }}
           onOpenLegal={setLegalDoc}
           onSubmitComplete={runTeaserCalculation}
         />

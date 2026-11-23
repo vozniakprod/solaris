@@ -10,9 +10,9 @@ interface CalculatingScreenProps {
 }
 
 const STEPS = [
-  'Wyznaczanie dokładnego momentu Solariusza 2027 (efemerydy)',
-  'Analiza aspektów planetarnych oraz miesięcy wzrostu i tarcia',
-  'Składanie osobistego skrótu raportu i okien dat 2027',
+  'Wyznaczanie dokładnego momentu Solariusza 2027',
+  'Analiza miesięcy wzrostu oraz okresów ostrożności',
+  'Przygotowanie Twojego osobistego skrótu i okien dat',
 ];
 
 export function CalculatingScreen({
@@ -36,17 +36,17 @@ export function CalculatingScreen({
 
   return (
     <main className="mx-auto flex min-h-[70vh] w-full max-w-lg flex-col items-center justify-center px-4 py-12">
-      <div className="w-full rounded-[26px] border border-white/[0.09] bg-[#121215] p-6 sm:p-8">
+      <div className="w-full rounded-2xl border border-zinc-200 bg-white p-6 shadow-[0_8px_30px_rgba(17,17,20,0.05)] sm:p-8">
         {!error ? (
           <>
-            <p className="font-mono text-xs text-[#D8B4FE]">
-              Silnik efemeryd i analiza matrycy solarnej
+            <p className="font-mono text-xs font-medium text-[#E84A27]">
+              Obliczenia 2027 w toku
             </p>
-            <h1 className="font-display mt-2 text-2xl font-medium text-white sm:text-3xl">
-              {personName}, obliczamy {isPair ? 'Waszą matrycę' : 'Twoją matrycę'} na 2027
+            <h1 className="font-display mt-2 text-2xl font-semibold text-[#111114] sm:text-3xl">
+              {personName}, przygotowujemy {isPair ? 'Wasz raport' : 'Twój raport'} na 2027
             </h1>
 
-            <div className="mt-6 space-y-3">
+            <div className="mt-6 space-y-2.5">
               {STEPS.map((label, idx) => {
                 const done = idx < completedStep;
                 const active = idx === completedStep;
@@ -55,19 +55,19 @@ export function CalculatingScreen({
                     key={label}
                     className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 text-xs sm:text-sm ${
                       done
-                        ? 'border-[#4ADE80]/30 bg-[#4ADE80]/[0.06] text-white'
+                        ? 'border-emerald-200 bg-emerald-50/70 text-[#111114]'
                         : active
-                          ? 'border-white/[0.14] bg-white/[0.04] text-[#E4E4EA]'
-                          : 'border-white/[0.05] bg-transparent text-[#6E6E78]'
+                          ? 'border-zinc-300 bg-zinc-50 text-[#111114]'
+                          : 'border-zinc-100 bg-white text-zinc-400'
                     }`}
                   >
                     <span
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
                         done
-                          ? 'bg-[#4ADE80] text-[#111114]'
+                          ? 'bg-emerald-600 text-white'
                           : active
-                            ? 'border border-[#FF5C35] text-[#FF5C35]'
-                            : 'border border-white/15'
+                            ? 'border-2 border-[#E84A27] text-[#E84A27]'
+                            : 'border border-zinc-300'
                       }`}
                     >
                       {done && <Check className="h-3 w-3 stroke-[3]" aria-hidden="true" />}
@@ -80,17 +80,17 @@ export function CalculatingScreen({
           </>
         ) : (
           <div className="space-y-4 text-center">
-            <h1 className="font-display text-2xl font-medium text-white">
+            <h1 className="font-display text-2xl font-semibold text-[#111114]">
               Nie udało się dokończyć obliczeń
             </h1>
-            <p role="alert" className="text-sm text-[#FF8566]">
+            <p role="alert" className="text-sm text-[#C83717]">
               {error}
             </p>
             <div className="flex flex-col gap-2.5 pt-2 sm:flex-row">
               <button
                 type="button"
                 onClick={onRetry}
-                className="inline-flex min-h-[46px] flex-1 items-center justify-center gap-2 rounded-full bg-[#FF5C35] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#FF6E4B]"
+                className="inline-flex min-h-[46px] flex-1 items-center justify-center gap-2 rounded-xl bg-[#E84A27] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#D43E1D]"
               >
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 <span>Spróbuj ponownie</span>
@@ -98,7 +98,7 @@ export function CalculatingScreen({
               <button
                 type="button"
                 onClick={onBack}
-                className="inline-flex min-h-[46px] flex-1 items-center justify-center rounded-full border border-white/15 px-5 py-2.5 text-sm font-medium text-[#D4D4DC] hover:text-white"
+                className="inline-flex min-h-[46px] flex-1 items-center justify-center rounded-xl border border-zinc-300 bg-white px-5 py-2.5 text-sm font-medium text-zinc-700 hover:text-[#111114]"
               >
                 Popraw dane
               </button>

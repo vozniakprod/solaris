@@ -20,6 +20,9 @@ export const FORM_DRAFT_STORAGE_KEY = 'solaris_form_draft_v1';
 
 interface QuizFunnelProps {
   initialMode: FunnelMode;
+  initialBirthDate?: string;
+  initialPartnerBirthDate?: string;
+  skipModeStep?: boolean;
   onCancel: () => void;
   onOpenLegal: (doc: LegalDocId) => void;
   onSubmitComplete: (payload: {
@@ -160,7 +163,6 @@ function PersonFields({
 
   useEffect(() => {
     const q = value.city.trim();
-    // Instant local matches first so typing never lags
     setSuggestions(searchCities(q, 8));
 
     if (q.length < 2) return;
@@ -209,18 +211,18 @@ function PersonFields({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-display text-2xl font-medium tracking-[-0.02em] text-white sm:text-3xl">
+        <h2 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#111114] sm:text-3xl">
           {title}
         </h2>
-        <p className="mt-1.5 text-sm text-[#9A9AA3]">{subtitle}</p>
+        <p className="mt-1.5 text-sm text-zinc-600">{subtitle}</p>
       </div>
 
-      <div className="space-y-3.5 pt-2">
+      <div className="space-y-4 pt-1">
         {/* Name or nickname */}
         <div>
           <label
             htmlFor={`${prefix}-name`}
-            className="mb-1.5 block text-xs font-medium text-[#C4C4CE]"
+            className="mb-1.5 block text-xs font-medium text-zinc-700"
           >
             Imię (lub pseudonim)
           </label>
@@ -231,7 +233,7 @@ function PersonFields({
             placeholder="np. Anna"
             value={value.name}
             onChange={(e) => onChange({ ...value, name: e.target.value })}
-            className="min-h-[48px] w-full rounded-xl border border-white/[0.12] bg-[#141417] px-4 py-3 text-base text-white placeholder:text-[#6E6E78] focus:border-[#FF5C35] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35]"
+            className="min-h-[48px] w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-base text-[#111114] placeholder:text-zinc-400 focus:border-[#E84A27] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E84A27]/30"
           />
         </div>
 
@@ -240,7 +242,7 @@ function PersonFields({
           <div>
             <label
               htmlFor={`${prefix}-date`}
-              className="mb-1.5 block text-xs font-medium text-[#C4C4CE]"
+              className="mb-1.5 block text-xs font-medium text-zinc-700"
             >
               Data urodzenia (DD.MM.RRRR)
             </label>
@@ -254,14 +256,14 @@ function PersonFields({
               onChange={(e) =>
                 onChange({ ...value, birthDate: formatBirthDateInput(e.target.value) })
               }
-              className="min-h-[48px] w-full rounded-xl border border-white/[0.12] bg-[#141417] px-4 py-3 font-mono text-base tabular-nums text-white placeholder:font-sans placeholder:text-[#6E6E78] focus:border-[#FF5C35] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35]"
+              className="min-h-[48px] w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-base tabular-nums text-[#111114] placeholder:font-sans placeholder:text-zinc-400 focus:border-[#E84A27] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E84A27]/30"
             />
           </div>
 
           <div>
             <label
               htmlFor={`${prefix}-time`}
-              className="mb-1.5 block text-xs font-medium text-[#C4C4CE]"
+              className="mb-1.5 block text-xs font-medium text-zinc-700"
             >
               Godzina urodzenia (opcjonalna)
             </label>
@@ -280,17 +282,17 @@ function PersonFields({
                     : raw;
                 onChange({ ...value, birthTime: normalized, timeUnknown: false });
               }}
-              className="min-h-[48px] w-full rounded-xl border border-white/[0.12] bg-[#141417] px-4 py-3 font-mono text-base tabular-nums text-white placeholder:font-sans placeholder:text-[#6E6E78] focus:border-[#FF5C35] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35] disabled:cursor-not-allowed disabled:opacity-45"
+              className="min-h-[48px] w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-base tabular-nums text-[#111114] placeholder:font-sans placeholder:text-zinc-400 focus:border-[#E84A27] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E84A27]/30 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
             />
           </div>
         </div>
 
-        {/* Exact Birth Time Helper + Unknown Checkbox (P0.3) */}
+        {/* Exact Birth Time Helper + Unknown Checkbox */}
         <div className="space-y-2">
-          <p className="text-[11px] leading-relaxed text-[#8E8E98]">
+          <p className="text-[11px] leading-relaxed text-zinc-500">
             {LEGAL_TEXTS.birthTimeHelper}
           </p>
-          <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3.5 py-2.5 text-xs text-[#C4C4CE] transition-colors hover:border-white/[0.14]">
+          <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-xl border border-zinc-200 bg-[#FAFAFA] px-3.5 py-2.5 text-xs text-zinc-700 transition-colors hover:border-zinc-300">
             <input
               type="checkbox"
               checked={value.timeUnknown}
@@ -301,23 +303,23 @@ function PersonFields({
                   birthTime: e.target.checked ? '' : value.birthTime,
                 })
               }
-              className="h-4 w-4 rounded border-white/30 accent-[#FF5C35]"
+              className="h-4 w-4 rounded border-zinc-300 accent-[#E84A27]"
             />
             <span>{LEGAL_TEXTS.birthTimeUnknownCheckbox}</span>
           </label>
         </div>
 
-        {/* Structured City Autocomplete + Nearest Major City Fallback (P0.1 & P1.8) */}
+        {/* Structured City Autocomplete + Nearest Major City Fallback */}
         <div className="relative space-y-2">
           <div className="flex items-center justify-between gap-2">
             <label
               htmlFor={`${prefix}-city`}
-              className="block text-xs font-medium text-[#C4C4CE]"
+              className="block text-xs font-medium text-zinc-700"
             >
               Miejsce urodzenia (wybierz miasto z listy)
             </label>
             {value.cityData && (
-              <span className="font-mono text-[10px] text-[#4ADE80]">
+              <span className="font-mono text-[10px] font-medium text-emerald-700">
                 ✓ {value.cityData.tz}
               </span>
             )}
@@ -325,7 +327,7 @@ function PersonFields({
 
           <div className="relative">
             <MapPin
-              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7D7D87]"
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
               aria-hidden="true"
             />
             <input
@@ -335,7 +337,7 @@ function PersonFields({
               aria-autocomplete="list"
               aria-controls={`${prefix}-city-listbox`}
               aria-expanded={cityFocused && !value.cityData}
-              placeholder="Wybierz miasto z listy, np. Warszawa, Kraków, Berlin"
+              placeholder="np. Warszawa, Kraków, Gdańsk"
               value={value.city}
               onFocus={() => setCityFocused(true)}
               onBlur={() => setTimeout(() => setCityFocused(false), 180)}
@@ -343,10 +345,10 @@ function PersonFields({
                 onChange({
                   ...value,
                   city: e.target.value,
-                  cityData: null, // Force re-selecting structured city when text changes
+                  cityData: null,
                 })
               }
-              className="min-h-[48px] w-full rounded-xl border border-white/[0.12] bg-[#141417] py-3 pl-10 pr-4 text-base text-white placeholder:text-[#6E6E78] focus:border-[#FF5C35] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35]"
+              className="min-h-[48px] w-full rounded-xl border border-zinc-300 bg-white py-3 pl-10 pr-4 text-base text-[#111114] placeholder:text-zinc-400 focus:border-[#E84A27] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#E84A27]/30"
             />
           </div>
 
@@ -355,7 +357,7 @@ function PersonFields({
               id={`${prefix}-city-listbox`}
               role="listbox"
               aria-label="Podpowiedzi miejscowości"
-              className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-white/[0.12] bg-[#18181D] p-1 shadow-2xl"
+              className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-xl"
             >
               {suggestions.length > 0 ? (
                 suggestions.map((city) => (
@@ -367,42 +369,40 @@ function PersonFields({
                         handleSelectPlace(city);
                       }}
                       onClick={() => handleSelectPlace(city)}
-                      className="flex min-h-[42px] w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/[0.08]"
+                      className="flex min-h-[42px] w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-[#111114] transition-colors hover:bg-zinc-100"
                     >
-                      <span className="truncate">
+                      <span className="truncate font-medium">
                         {city.name}
                         {city.admin1 && city.admin1.toLowerCase() !== city.name.toLowerCase() ? (
-                          <span className="text-xs text-[#9A9AA3]">, {city.admin1}</span>
+                          <span className="font-normal text-xs text-zinc-500">, {city.admin1}</span>
                         ) : null}
                       </span>
-                      <span className="shrink-0 text-xs text-[#8E8E98]">{city.country}</span>
+                      <span className="shrink-0 text-xs text-zinc-500">{city.country}</span>
                     </button>
                   </li>
                 ))
               ) : (
-                <li className="px-3 py-2.5 text-xs text-[#A1A1AA]">
+                <li className="px-3 py-2.5 text-xs text-zinc-500">
                   {LEGAL_TEXTS.cityNotFoundError}
                 </li>
               )}
             </ul>
           )}
 
-          <p className="text-[11px] leading-relaxed text-[#8E8E98]">
-            {LEGAL_TEXTS.cityHelper}
-          </p>
+          <p className="text-[11px] leading-relaxed text-zinc-500">{LEGAL_TEXTS.cityHelper}</p>
 
           <div>
             <button
               type="button"
               onClick={() => setShowNearestFallback((prev) => !prev)}
-              className="text-xs font-medium text-[#D8B4FE] underline decoration-[#D8B4FE]/40 underline-offset-4 hover:text-white"
+              className="text-xs font-medium text-[#E84A27] underline decoration-[#E84A27]/40 underline-offset-4 hover:text-[#111114]"
             >
               Nie możesz znaleźć? Wybierz najbliższe większe miasto
             </button>
 
             {showNearestFallback && (
-              <div className="mt-2.5 rounded-xl border border-white/[0.09] bg-[#16161B] p-3">
-                <p className="mb-2 text-[11px] font-medium text-[#C4C4CE]">
+              <div className="mt-2.5 rounded-xl border border-zinc-200 bg-[#FAFAFA] p-3">
+                <p className="mb-2 text-[11px] font-medium text-zinc-600">
                   Najbliższe większe miasto (wybierz jednym kliknięciem):
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -411,7 +411,7 @@ function PersonFields({
                       key={city.name}
                       type="button"
                       onClick={() => handleSelectPlace(city)}
-                      className="min-h-[34px] rounded-full border border-white/[0.12] bg-white/[0.04] px-3 py-1 text-xs text-white transition-colors hover:border-[#FF5C35] hover:bg-[#FF5C35]/15"
+                      className="min-h-[34px] rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-[#111114] transition-colors hover:border-[#E84A27] hover:text-[#E84A27]"
                     >
                       {city.name}
                     </button>
@@ -423,8 +423,8 @@ function PersonFields({
         </div>
       </div>
 
-      {/* Required Privacy Notice below form (P1.8) */}
-      <p className="border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-[#8E8E98]">
+      {/* Required Privacy Notice below form */}
+      <p className="border-t border-zinc-100 pt-3 text-[11px] leading-relaxed text-zinc-500">
         {LEGAL_TEXTS.formPrivacyHelper}{' '}
         <a
           href="/polityka-prywatnosci"
@@ -432,7 +432,7 @@ function PersonFields({
             e.preventDefault();
             onOpenLegal('polityka');
           }}
-          className="text-[#C4C4CE] underline hover:text-white"
+          className="text-zinc-700 underline hover:text-[#111114]"
         >
           Polityce prywatności
         </a>
@@ -440,7 +440,7 @@ function PersonFields({
       </p>
 
       {error && (
-        <p role="alert" className="text-sm font-medium text-[#FF8566]">
+        <p role="alert" className="text-sm font-medium text-[#C83717]">
           {error}
         </p>
       )}
@@ -450,6 +450,9 @@ function PersonFields({
 
 export function QuizFunnel({
   initialMode,
+  initialBirthDate,
+  initialPartnerBirthDate,
+  skipModeStep = false,
   onCancel,
   onOpenLegal,
   onSubmitComplete,
@@ -460,14 +463,21 @@ export function QuizFunnel({
   const [relationType, setRelationType] = useState<RelationType>(
     initialDraft?.relationType ?? 'para',
   );
-  const [step, setStep] = useState<'mode' | 'person1' | 'person2' | 'quiz'>('mode');
-  const [person1, setPerson1] = useState<PersonInput>(initialDraft?.person1 ?? EMPTY_PERSON);
-  const [person2, setPerson2] = useState<PersonInput>(initialDraft?.person2 ?? EMPTY_PERSON);
+  const [step, setStep] = useState<'mode' | 'person1' | 'person2' | 'quiz'>(
+    skipModeStep ? 'person1' : 'mode',
+  );
+  const [person1, setPerson1] = useState<PersonInput>(() => {
+    const base = initialDraft?.person1 ?? EMPTY_PERSON;
+    return initialBirthDate ? { ...base, birthDate: initialBirthDate } : base;
+  });
+  const [person2, setPerson2] = useState<PersonInput>(() => {
+    const base = initialDraft?.person2 ?? EMPTY_PERSON;
+    return initialPartnerBirthDate ? { ...base, birthDate: initialPartnerBirthDate } : base;
+  });
   const [quizIndex, setQuizIndex] = useState(0);
   const [answers, setAnswers] = useState<Partial<QuizAnswers>>(initialDraft?.answers ?? {});
   const [error, setError] = useState<string | null>(null);
 
-  // Persist draft in localStorage so reload or "Spróbuj ponownie" never erases user input (P0.2)
   useEffect(() => {
     try {
       const draft: DraftState = { mode, relationType, person1, person2, answers };
@@ -505,7 +515,6 @@ export function QuizFunnel({
       return { ok: false, error: dateRes.error };
     }
 
-    // Birth time is optional: empty string when unchecked is treated cleanly as unknown
     const isUnknown = person.timeUnknown || person.birthTime.trim() === '';
     const timeRes = validateBirthTime(person.birthTime, isUnknown);
     if (!timeRes.ok) {
@@ -607,7 +616,11 @@ export function QuizFunnel({
       return;
     }
     if (step === 'person1') {
-      setStep('mode');
+      if (skipModeStep) {
+        onCancel();
+      } else {
+        setStep('mode');
+      }
       return;
     }
     if (step === 'person2') {
@@ -627,42 +640,42 @@ export function QuizFunnel({
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 pb-16 pt-6 sm:px-6 sm:pt-10">
-      {/* Progress Bar Header */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between text-xs text-[#9A9AA3]">
+      {/* Clean Progress Bar Header */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between text-xs text-zinc-600">
           <button
             type="button"
             onClick={handleBack}
-            className="inline-flex min-h-[40px] items-center gap-1.5 font-medium text-[#C4C4CE] transition-colors hover:text-white"
+            className="inline-flex min-h-[40px] items-center gap-1.5 font-medium text-zinc-600 transition-colors hover:text-[#111114]"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             <span>Wstecz</span>
           </button>
 
-          <span className="font-mono tabular-nums text-[#A1A1AA]">
+          <span className="font-mono font-medium tabular-nums text-zinc-500">
             {step === 'quiz'
               ? `Pytanie ${quizIndex + 1} / ${QUIZ_QUESTIONS.length}`
               : `Krok ${currentStageNum} / ${totalStages}`}
           </span>
         </div>
 
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200">
           <div
             style={{ width: `${progressPct}%` }}
-            className="h-full rounded-full bg-[#FF5C35] transition-all duration-200"
+            className="h-full rounded-full bg-[#E84A27] transition-all duration-200"
           />
         </div>
       </div>
 
-      {/* Main Funnel Card (Exact Figma dark card surface) */}
-      <div className="rounded-[26px] border border-white/[0.09] bg-[#121215] p-5 sm:p-8">
+      {/* Crisp White Funnel Card */}
+      <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_8px_30px_rgba(17,17,20,0.05)] sm:p-8">
         {step === 'mode' && (
           <div className="space-y-6">
             <div>
-              <h1 className="font-display text-2xl font-medium tracking-[-0.02em] text-white sm:text-3xl">
+              <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] text-[#111114] sm:text-3xl">
                 Dla kogo przygotowujemy raport 2027?
               </h1>
-              <p className="mt-2 text-sm leading-relaxed text-[#9A9AA3]">
+              <p className="mt-2 text-sm leading-relaxed text-zinc-600">
                 Wszystkie dane wpisujesz w jednym miejscu — bez zakładania konta i bez wysyłania linków.
               </p>
             </div>
@@ -674,23 +687,25 @@ export function QuizFunnel({
                 aria-pressed={mode === 'solo'}
                 className={`flex min-h-[112px] flex-col justify-between rounded-2xl border p-4 text-left transition-colors duration-150 ${
                   mode === 'solo'
-                    ? 'border-[#FF5C35] bg-[#FF5C35]/10 text-white'
-                    : 'border-white/[0.09] bg-[#17171B] text-[#C4C4CE] hover:border-white/25'
+                    ? 'border-[#E84A27] bg-[#FFF5F2] text-[#111114]'
+                    : 'border-zinc-200 bg-[#FAFAFA] text-zinc-700 hover:border-zinc-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/[0.08] text-white">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[#111114] shadow-xs">
                     <User className="h-4 w-4" aria-hidden="true" />
                   </span>
                   {mode === 'solo' && (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#FF5C35] text-white">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#E84A27] text-white">
                       <Check className="h-3 w-3 stroke-[3]" aria-hidden="true" />
                     </span>
                   )}
                 </div>
                 <div className="mt-4">
-                  <p className="font-display text-base font-semibold text-white">Tylko dla mnie</p>
-                  <p className="mt-0.5 text-xs text-[#9A9AA3]">
+                  <p className="font-display text-base font-semibold text-[#111114]">
+                    Tylko dla mnie
+                  </p>
+                  <p className="mt-0.5 text-xs text-zinc-600">
                     Finanse, relacje, energia i przełomy 2027
                   </p>
                 </div>
@@ -702,23 +717,23 @@ export function QuizFunnel({
                 aria-pressed={mode === 'pair'}
                 className={`flex min-h-[112px] flex-col justify-between rounded-2xl border p-4 text-left transition-colors duration-150 ${
                   mode === 'pair'
-                    ? 'border-[#FF5C35] bg-[#FF5C35]/10 text-white'
-                    : 'border-white/[0.09] bg-[#17171B] text-[#C4C4CE] hover:border-white/25'
+                    ? 'border-[#E84A27] bg-[#FFF5F2] text-[#111114]'
+                    : 'border-zinc-200 bg-[#FAFAFA] text-zinc-700 hover:border-zinc-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D8B4FE]/20 text-[#D8B4FE]">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-[#E84A27] shadow-xs">
                     <Users className="h-4 w-4" aria-hidden="true" />
                   </span>
                   {mode === 'pair' && (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#FF5C35] text-white">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#E84A27] text-white">
                       <Check className="h-3 w-3 stroke-[3]" aria-hidden="true" />
                     </span>
                   )}
                 </div>
                 <div className="mt-4">
-                  <p className="font-display text-base font-semibold text-white">Dla dwojga</p>
-                  <p className="mt-0.5 text-xs text-[#9A9AA3]">
+                  <p className="font-display text-base font-semibold text-[#111114]">Dla dwojga</p>
+                  <p className="mt-0.5 text-xs text-zinc-600">
                     Twój raport + porównanie zgodności 2027
                   </p>
                 </div>
@@ -726,10 +741,8 @@ export function QuizFunnel({
             </div>
 
             {mode === 'pair' && (
-              <div className="space-y-2.5 border-t border-white/[0.07] pt-4">
-                <p className="text-xs font-medium text-[#C4C4CE]">
-                  Jaka relacja Was łączy?
-                </p>
+              <div className="space-y-2.5 border-t border-zinc-100 pt-4">
+                <p className="text-xs font-medium text-zinc-700">Jaka relacja Was łączy?</p>
                 <div className="grid grid-cols-3 gap-2">
                   {(
                     [
@@ -743,10 +756,10 @@ export function QuizFunnel({
                       type="button"
                       onClick={() => setRelationType(rel.id)}
                       aria-pressed={relationType === rel.id}
-                      className={`min-h-[44px] rounded-xl border px-2.5 py-2 text-xs font-medium transition-colors duration-150 ${
+                      className={`min-h-[44px] rounded-xl border px-2.5 py-2 text-xs font-semibold transition-colors duration-150 ${
                         relationType === rel.id
-                          ? 'border-[#D8B4FE] bg-[#D8B4FE] text-[#111114]'
-                          : 'border-white/[0.1] bg-[#17171B] text-[#C4C4CE] hover:border-white/25'
+                          ? 'border-[#111114] bg-[#111114] text-white'
+                          : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
                       }`}
                     >
                       {rel.label}
@@ -759,7 +772,7 @@ export function QuizFunnel({
             <button
               type="button"
               onClick={() => setStep('person1')}
-              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#FF5C35] px-6 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#FF6E4B]"
+              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-[#E84A27] px-6 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#D43E1D]"
             >
               <span>Przejdź do danych urodzenia</span>
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -778,7 +791,7 @@ export function QuizFunnel({
           >
             <PersonFields
               title="Twoje dane do Solariusza 2027"
-              subtitle="Podaj imię (lub pseudonim), datę oraz miejsce urodzenia. Godzina jest opcjonalna."
+              subtitle="Uzupełnij imię (lub pseudonim) oraz miasto urodzenia. Godzina jest opcjonalna."
               prefix="p1"
               value={person1}
               onChange={(next) => {
@@ -791,7 +804,7 @@ export function QuizFunnel({
 
             <button
               type="submit"
-              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#FF5C35] px-6 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#FF6E4B]"
+              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-[#E84A27] px-6 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#D43E1D]"
             >
               <span>
                 {mode === 'pair' ? 'Dalej: dane drugiej osoby' : 'Dalej: 5 krótkich pytań'}
@@ -825,7 +838,7 @@ export function QuizFunnel({
 
             <button
               type="submit"
-              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#FF5C35] px-6 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#FF6E4B]"
+              className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-[#E84A27] px-6 py-3 text-sm font-semibold text-white transition-colors duration-150 hover:bg-[#D43E1D]"
             >
               <span>Dalej: 5 krótkich pytań</span>
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
@@ -836,13 +849,13 @@ export function QuizFunnel({
         {step === 'quiz' && (
           <div className="space-y-5">
             <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-[#D8B4FE]">
-                Profil decyzyjny · 1 klik
+              <p className="font-mono text-xs font-medium text-[#E84A27]">
+                Profil decyzyjny · 1 kliknięcie
               </p>
-              <h2 className="font-display mt-2 text-xl font-medium leading-snug text-white sm:text-2xl">
+              <h2 className="font-display mt-2 text-xl font-semibold leading-snug text-[#111114] sm:text-2xl">
                 {activeQuestion.question}
               </h2>
-              <p className="mt-1.5 text-xs text-[#8E8E98]">{activeQuestion.hint}</p>
+              <p className="mt-1.5 text-xs text-zinc-500">{activeQuestion.hint}</p>
             </div>
 
             <div className="space-y-2.5 pt-1">
@@ -853,14 +866,19 @@ export function QuizFunnel({
                     key={opt}
                     type="button"
                     onClick={() => handleSelectQuizOption(activeQuestion.key, opt)}
-                    className={`flex min-h-[56px] w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5C35] ${
+                    className={`flex min-h-[54px] w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E84A27] ${
                       selected
-                        ? 'border-[#FF5C35] bg-[#FF5C35]/15 text-white'
-                        : 'border-white/[0.09] bg-[#17171B] text-[#E4E4EA] hover:border-white/25 hover:bg-[#1D1D22]'
+                        ? 'border-[#E84A27] bg-[#FFF5F2] text-[#111114]'
+                        : 'border-zinc-200 bg-[#FAFAFA] text-[#111114] hover:border-zinc-400 hover:bg-white'
                     }`}
                   >
                     <span>{opt}</span>
-                    <ArrowRight className="h-4 w-4 shrink-0 text-[#7D7D87]" aria-hidden="true" />
+                    <ArrowRight
+                      className={`h-4 w-4 shrink-0 ${
+                        selected ? 'text-[#E84A27]' : 'text-zinc-400'
+                      }`}
+                      aria-hidden="true"
+                    />
                   </button>
                 );
               })}

@@ -555,24 +555,24 @@ export function renderStaticLegalHtml(doc: LegalDocumentData): string {
   <title>${escapeHtml(doc.title)} — Solaris 2027</title>
   <meta name="description" content="${escapeHtml(doc.title)} — oficjalny dokument serwisu Solaris 2027." />
   <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0B0B0D; color: #E4E4EA; line-height: 1.65; }
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #FAFAFA; color: #111114; line-height: 1.65; }
     .wrap { max-width: 820px; margin: 0 auto; padding: 40px 20px 72px; }
-    header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 20px; margin-bottom: 28px; }
-    a { color: #FF7B5A; text-decoration: none; }
+    header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #E4E4E7; padding-bottom: 20px; margin-bottom: 28px; }
+    a { color: #E84A27; text-decoration: none; }
     a:hover { text-decoration: underline; }
     nav { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; }
-    h1 { font-size: 28px; color: #FFFFFF; margin: 0 0 8px; line-height: 1.25; }
-    .meta { font-size: 13px; color: #9A9AA3; margin-bottom: 28px; }
-    h2 { font-size: 18px; color: #FFFFFF; margin: 28px 0 10px; }
-    p, li { font-size: 14px; color: #D4D4DC; }
+    h1 { font-size: 28px; color: #111114; margin: 0 0 8px; line-height: 1.25; }
+    .meta { font-size: 13px; color: #71717A; margin-bottom: 28px; }
+    h2 { font-size: 18px; color: #111114; margin: 28px 0 10px; }
+    p, li { font-size: 14px; color: #3F3F46; }
     ul { padding-left: 20px; }
     li { margin-bottom: 6px; }
     .table-wrap { overflow-x: auto; margin: 14px 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { border: 1px solid rgba(255,255,255,0.12); padding: 10px 12px; text-align: left; vertical-align: top; }
-    th { background: #17171B; color: #FFFFFF; }
-    footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 12px; color: #8E8E98; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; background: #FFFFFF; }
+    th, td { border: 1px solid #E4E4E7; padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: #F4F4F5; color: #111114; }
+    footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid #E4E4E7; font-size: 12px; color: #71717A; }
   </style>
 </head>
 <body>
